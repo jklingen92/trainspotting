@@ -1,15 +1,11 @@
-from functools import cached_property
-from json import load
 import cv2
 import os
-import matplotlib.pyplot as plt
 import numpy as np
 
+from json import load
 from django.conf import settings
-from django.utils import timezone
-from django.core.management.base import BaseCommand, CommandParser
+from django.core.management.base import BaseCommand
 from numpy import Infinity
-from datetime import datetime, timedelta
 
 from detection.utils import ImageInterface, Video, Clip, milli2timestamp, FFMPEG_BASE
 

@@ -1,7 +1,6 @@
 import os
 import cv2
 import matplotlib.pyplot as plt
-import numpy as np
 
 from datetime import datetime, timedelta
 from functools import cached_property
@@ -113,7 +112,7 @@ class Video:
 
     @cached_property
     def duration(self):
-        return self.frame_count / self.fps * 999.947
+        return self.frame_count / self.fps * 1000
 
     def release(self):
         self.cap.release()
