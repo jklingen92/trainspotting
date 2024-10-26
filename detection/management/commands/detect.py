@@ -34,13 +34,14 @@ class Command(BaseCommand):
 
         unfinished = None 
         n_videos = len(options['videos'])  
+        i = 0
         while True:
             try:
                 gap, video = next(videos)
             except StopIteration:
                 if unfinished is not None:
                     self.stdout.write(f"  Unable to finish clip: {unfinished.path}")
-                self.stdout.write(f"Processed {n_videos}. Clips deposited in {dest}")
+                self.stdout.write(f"Processed {n_videos} video. Clips deposited in {dest}")
                 break
             
             if gap:
@@ -109,11 +110,10 @@ class Command(BaseCommand):
             
             # Use FFMPEG to write the clips to a file
             self.stdout.write()
-            i = 0
-            for clip in clips:
+            for j, clip in enumerate(clips):
                 outfile = os.path.join(dest, clip.dest(video))
 
-                self.stdout.write(f"  Clipping {i + 1} of {len(clips)}: {milli2timestamp(clip.start)} - {milli2timestamp(clip.end) if clip.end else 'End of video'}")
+                self.stdout.write(f"  Clipping {j + 1} of {len(clips)}: {milli2timestamp(clip.start)} - {milli2timestamp(clip.end) if clip.end else 'End of video'}")
                 if not options["fake"]:
                     end_str = ""
                     if clip.end is not None:
@@ -135,6 +135,8 @@ class Command(BaseCommand):
             if unfinished is not None and unfinished.defer:
                 unfinished.path = outfile
                 unfinished.defer = False
+
+            i += 1
 
     def initialize_dest(self, options):
         """Determine destination folder and create if necessary."""
