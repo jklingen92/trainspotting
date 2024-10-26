@@ -19,7 +19,7 @@ class Command(BaseCommand):
         parser.add_argument('-u', '--upper', default=5, type=float)
         parser.add_argument('-l', '--lower', default=1, type=float)
         parser.add_argument('-m', '--minlength', default=3, type=int)
-        parser.add_argument('-b', '--buffer', default=7, type=int)
+        parser.add_argument('-b', '--buffer', default=5, type=int)
         parser.add_argument('-f', '--fake', default=False, action='store_true')
         parser.add_argument('--location')
         parser.add_argument('--nomerge', action='store_true', default=False)
