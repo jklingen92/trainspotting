@@ -2,6 +2,9 @@
 clips
 raw
 
+# Classification training data
+classification/training
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
