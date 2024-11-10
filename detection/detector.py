@@ -4,6 +4,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
+from functools import cached_property
 from json import load
 import os
 
@@ -18,7 +19,7 @@ from trainspotting.utils import Video, concat_clip
 class Clip:
     def __init__(self, video, frame) -> None:
         self.video = video
-        self.start = video.start + timedelta(milliseconds=video.pos_milli)
+        self.start = video.pos_milli
         self.start_frame = frame
         self.end = None
         self.end_frame = None
@@ -41,11 +42,13 @@ class Clip:
         self.video.clip_by_frame(destination, start_frame=self.start_frame, end_frame=self.end_frame)
         return destination
     
+    def __str__(self) -> str:
+        return f"{self.video.filename} [{timedelta(milliseconds=self.start)} - {timedelta(milliseconds=self.end) if self.end else 'End'}]{' (to be merged)' if self.merge_to else ''}"
+    
 
-class DetectorParams(dataclass):
+@dataclass
+class DetectorParams:
     destination: str = ""
-    fake: bool = False
-    nomerge: bool = False
     buffer: int = 5
     minlength: int = 5
     upper: float = 5
@@ -61,19 +64,27 @@ class Motion(Enum):
 class Detector:
     """Detector manages a detection task, including managing the videos and clipping them."""
 
-    def __init__(self, video_paths, logger=None, **params) -> None:
-        self.log = lambda text: logger(text) if logger is not None else None
+    def __init__(self, video_paths, log=None, **params) -> None:
+        if log is None:
+            self.log = print
+        else:
+            self.log = log
         self.params = DetectorParams(params)
 
-        self.log("Processing videos initially...")
+        self.num_videos = len(video_paths)
         self.video_paths = self.sort_video_paths(video_paths)
+        self.get_detect_box(Video(self.video_paths[0]))
+
+        self.log(f"Processing {self.num_videos} videos...")
         self.videos = self.video_generator(video_paths)
-        self.detect_box = self.get_detect_box(Video(self.video_paths[0]))
         
         self.unfinished_clip = None
-        self.num_videos = None
         self.counter = 0
         self.clips = []
+
+    @property
+    def num_clips(self):
+        return len(self.clips)
 
     def sort_video_paths(self, video_paths):
         """Sort video paths."""
@@ -134,13 +145,13 @@ class Detector:
 
     def process_video(self, video):
         """Loop through a single video and look for clips."""
-        self.log(f"Processing video {self.counter + 1} of {self.num_videos}: {video.path}")
-        tail_frames = video.fps * self.buffer
-        minlength = self.buffer + self.params.minlength 
+        self.log(f"  Processing video {self.counter + 1} of {self.num_videos}: {video.path}")
+        tail_frames = video.fps * self.params.buffer
+        minlength = self.params.buffer + self.params.minlength 
         stills = 0
         clip = None
-        if self.unifinished_clip is not None:
-            self.log(f"  Found unfinished clip, seeking matching frame...")
+        if self.unfinished_clip is not None:
+            self.log(f"    Found unfinished clip, seeking matching frame...")
             frame, clip = self.seek_matching_frame(video, self.unfinished_clip.end_frame)
             clip.merge_to = self.unfinished_clip.path
             self.unfinished_clip = None
@@ -155,13 +166,13 @@ class Detector:
             motion = self.detect_motion(detect0, detect1)
 
             if clip is not None:
-                status = f"Capturing: {timedelta(milliseconds=video.pos_milli - clip.start)} | Stills: {clip.stills:4d}"
+                status = f"  Capturing: {timedelta(milliseconds=video.pos_milli - clip.start)} | Stills: {stills:4d}"
             else:
                 status = "-" * 30
-            self.log(f"Progress: {timedelta(milliseconds=video.pos_milli)} | {status}", ending="\r")
+            self.log(f"  Progress: {timedelta(milliseconds=video.pos_milli)} | {status}", ending="\r")
 
             if clip is None and motion == Motion.MOTION:  # Start capturing
-                clip = Clip(video.pos_milli)
+                clip = Clip(video, frame)
                 clip.buff_start(self.params.buffer)
 
             elif clip is not None:
@@ -213,16 +224,16 @@ class Detector:
             diff = self.compare_images(frame, img)
             if diff == 0.0:
                 _, frame = video.cap.read()
-                clip = Clip(video.pos_milli + offset)
+                clip = Clip(video, frame)
+                clip.start = clip.start + offset
                 break
         
         return frame, clip
     
     def clip_videos(self):
         """Clip videos based on motion detection."""
-        num_clips = len(self.clips)
         for i, clip in enumerate(self.clips):
-            self.log(f"Clipping {i + 1} of {num_clips}: {clip.start} - {clip.end if clip.end else 'End of video'}")
+            self.log(f"  Clipping {i + 1} of {self.num_clips}: {clip}")
             if not self.params.fake:
                 outfile = clip.clip(self.params.destination)
 

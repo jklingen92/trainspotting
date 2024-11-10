@@ -20,10 +20,15 @@ class Command(VideosCommand):
 
     def handle(self, *args, **options):
         video_paths = options.pop("videos")
-        detector = Detector(video_paths, logger=self.stdout.write, **options)
+        fake = options.pop("fake")
+        detector = Detector(video_paths, log=self.stdout.write, **options)
         detector.process_videos()
-        print(detector.clips)
-        # detector.clip_videos()
+        if fake and detector.clips:
+            self.stdout.write(f"Found {detector.num_clips} clips:")
+            for i, clip in enumerate(detector.clips):
+                self.stdout.write(f"  Clipping {i + 1} of {detector.num_clips}: {clip}")
+        else:
+            detector.clip_videos()
 
 
 
