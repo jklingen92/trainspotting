@@ -240,6 +240,7 @@ class Detector:
                 outfile = clip.clip(self.params.destination)
 
                 if clip.merge_to is not None and not self.params.nomerge:
+                    self.log(f"  Merging clip to {clip.merge_to.split('/')[-1]}")
                     concat_clip(clip.merge_to, outfile)
 
                 
