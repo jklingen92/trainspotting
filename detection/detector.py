@@ -64,16 +64,28 @@ class Motion(Enum):
 class Detector:
     """Detector manages a detection task, including managing the videos and clipping them."""
 
-    def __init__(self, video_paths, log=None, **params) -> None:
-        if log is None:
-            self.log = print
-        else:
-            self.log = log
+    def __init__(self, video_paths, logger=None, **params) -> None:
+
+        def log(msg, **kwargs):
+            if logger is not None:
+                logger(msg, **kwargs)
+            else:
+                print(msg)
+
+        self.log = log
         self.params = DetectorParams(params)
 
         self.num_videos = len(video_paths)
         self.video_paths = self.sort_video_paths(video_paths)
-        self.get_detect_box(Video(self.video_paths[0]))
+        success, first_frame = Video(self.video_paths[0]).read()
+        if not success:
+            raise Exception(f"First video has no frames!")
+        
+        self.first_frame_interface = ImageInterface(first_frame)
+        self.detect_box = self.first_frame_interface.get_bounding_box(
+            title="Select a region for detection, or leave blank to use the full frame",
+            defaults=((0, 0), (self.first_frame_interface.width, self.first_frame_interface.height))
+        )
 
         self.log(f"Processing {self.num_videos} videos...")
         self.videos = self.video_generator(video_paths)
@@ -81,6 +93,7 @@ class Detector:
         self.unfinished_clip = None
         self.counter = 0
         self.clips = []
+
 
     @property
     def num_clips(self):
@@ -90,22 +103,11 @@ class Detector:
         """Sort video paths."""
         return sorted(video_paths)
 
-    def get_detect_box(self, video):
-        """Takes a Video and usess the first frame to select a detect box."""
-        success, img = video.cap.read()
-        if success:
-            title1 = "Select change detection box"
-            self.log(title1)
-            interface = ImageInterface(img)
-            self.detect_box = interface.get_bounding_box(title=title1, defaults=((0, 0), (interface.width, interface.height)))
-        else:
-            raise Exception(f"{video} has no frames!")
-
-    @staticmethod
-    def video_generator(video_paths):
+    def video_generator(self, video_paths):
         """Create a lazy generator that returns Videos based on paths"""
         last_video_end = None
-        for video_path in video_paths:
+        for i, video_path in enumerate(video_paths):
+            self.counter = i
             video = Video(video_path)
             gap = last_video_end is None or last_video_end > video.start
             yield gap, video
@@ -125,12 +127,14 @@ class Detector:
         score = np.mean(diff)
         return score
     
-    def detect_motion(self, img0, img1):
-        """Compare two images and return motion classification."""
-        score = self.compare_images(img0, img1)
-        if score >= self.params.upper:
+    def detect_motion(self, frame0, frame1):
+        """Compare two frames and return motion classification."""
+        detect0 = self.process_frame(frame0, self.detect_box)
+        detect1 = self.process_frame(frame1, self.detect_box)
+        detect_score = self.compare_images(detect0, detect1)
+        if detect_score >= self.params.upper:
             return Motion.MOTION
-        elif score <= self.params.lower:
+        elif detect_score <= self.params.lower:
             return Motion.STILL
         else:
             return Motion.UNKNOWN
@@ -145,38 +149,36 @@ class Detector:
 
     def process_video(self, video):
         """Loop through a single video and look for clips."""
-        self.log(f"  Processing video {self.counter + 1} of {self.num_videos}: {video.path}")
+        self.log(f"  Processing video {self.counter + 1} of {self.num_videos}: {video.path}", ending="\n")
         tail_frames = video.fps * self.params.buffer
         minlength = self.params.buffer + self.params.minlength 
         stills = 0
         clip = None
         if self.unfinished_clip is not None:
             self.log(f"    Found unfinished clip, seeking matching frame...")
-            frame, clip = self.seek_matching_frame(video, self.unfinished_clip.end_frame)
+            frame0, clip = self.seek_matching_frame(video, self.unfinished_clip.end_frame)
             clip.merge_to = self.unfinished_clip.path
             self.unfinished_clip = None
         else:
-            success, frame = video.read()
+            success, frame0 = video.read()
         
-        detect0 = self.process_frame(frame, self.detect_box)
-        success, frame = video.read()
+        success, frame1 = video.read()
             
         while success:
-            detect1 = self.process_frame(frame, self.detect_box)
-            motion = self.detect_motion(detect0, detect1)
+            motion = self.detect_motion(frame0, frame1)
 
             if clip is not None:
-                status = f"  Capturing: {timedelta(milliseconds=video.pos_milli - clip.start)} | Stills: {stills:4d}"
+                status = f"    Capturing: {timedelta(milliseconds=video.pos_milli - clip.start)} | Stills: {stills:4d}"
             else:
                 status = "-" * 30
-            self.log(f"  Progress: {timedelta(milliseconds=video.pos_milli)} | {status}", ending="\r")
+            self.log(f"    Progress: {timedelta(milliseconds=video.pos_milli)} | {status}", ending="\r")
 
             if clip is None and motion == Motion.MOTION:  # Start capturing
-                clip = Clip(video, frame)
+                clip = Clip(video, frame1)
                 clip.buff_start(self.params.buffer)
 
             elif clip is not None:
-                clip.end_frame = frame
+                clip.end_frame = frame1
                 if motion == Motion.MOTION:
                     stills = 0
                 elif motion == Motion.STILL:
@@ -188,8 +190,8 @@ class Detector:
                             self.clips.append(clip)
                         clip = None
             
-            detect0 = detect1
-            success, frame = video.read()
+            frame0 = frame1
+            success, frame1 = video.read()
 
         # Stash an unfinished clip
         if clip is not None:
@@ -241,8 +243,30 @@ class Detector:
                     concat_clip(clip.merge_to, outfile)
 
                 
-                
+
+class ExclusionDetector(Detector):
+    """
+    ExclusionDetector is a detector class that allows for the exclusion of a region of the frame.
     
-        # title2 = "Select box to exclude"
-        # self.log(title2)
-        # exclusion_box = interface.get_bounding_box(title=title2, required=False, color="red")
+    If movement is detected in the detection region as well as in the exclusion region, it will be ignored.
+    """    
+    
+    def __init__(self, video_paths, log=None, **params) -> None:
+        super().__init__(video_paths, log, **params)
+        self.exclude_box = self.first_frame_interface.get_bounding_box(
+            title="Select a region for exclusion, or leave blank for None",
+            color="red"
+        )
+
+    def detect_motion(self, frame0, frame1):
+        detect_classification = super().detect_motion(frame0, frame1)
+
+        exclude0 = self.process_frame(frame0, self.exclude_box)
+        exclude1 = self.process_frame(frame1, self.exclude_box)
+        exclude_score = self.compare_images(exclude0, exclude1)
+        if exclude_score > self.params.upper:
+            return Motion.STILL
+        elif exclude_score < self.params.lower:
+            return detect_classification
+        else:
+            return Motion.UNKNOWN

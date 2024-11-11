@@ -78,15 +78,3 @@ class ImageInterface:
         self.bounding_box = None
         return bounding_box
 
-    def display_bounding_box(self):
-        fig, ax = plt.subplots()
-        ax.imshow(self.image)
-
-        (x1, y1), (x2, y2) = self.bounding_box
-        width = x2 - x1
-        height = y2 - y1
-        rect = Rectangle((x1, y1), width, height, fill=False, edgecolor='red', linewidth=2)
-        ax.add_patch(rect)
-
-        plt.title('Final Image with Selected Rectangle')
-        plt.show()
