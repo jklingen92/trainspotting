@@ -1,39 +1,42 @@
-import cv2
-import os
-import numpy as np
+import json
+from django.core.management.base import BaseCommand
 
-from json import load
 from detection.detector import Detector, ExclusionDetector
-from trainspotting.utils import VideosCommand, Video, FFMPEG_BASE
+from trainspotting.utils import FFMPEG_BASE
 
 
-class Command(VideosCommand):
+class Command(BaseCommand):
     help = "Isolates and clips motion events from a video file"
 
     def add_arguments(self, parser):
-        super().add_arguments(parser)
+        parser.add_argument('videos', nargs="+")
+        parser.add_argument('-r', '--results', default="results.json", type=str)        
         parser.add_argument('-u', '--upper', default=5, type=float)
         parser.add_argument('-l', '--lower', default=1, type=float)
         parser.add_argument('-m', '--minlength', default=3, type=int)
-        parser.add_argument('-f', '--fake', default=False, action='store_true')
         parser.add_argument('-x', '--exclude', default=False, action='store_true')
         parser.add_argument('--nomerge', action='store_true', default=False)
 
     def handle(self, *args, **options):
         video_paths = options.pop("videos")
-        fake = options.pop("fake")
         exclude = options.pop("exclude")
         if exclude:
             detector = ExclusionDetector(video_paths, log=self.stdout.write, **options)
         else:
-            detector = Detector(video_paths, log=self.stdout.write, **options)
-        detector.process_videos()
-        if fake and detector.clips:
-            self.stdout.write(f"Found {detector.num_clips} clips:")
-            for i, clip in enumerate(detector.clips):
-                self.stdout.write(f"  Clipping {i + 1} of {detector.num_clips}: {clip} -> {clip.outfile}")
-        else:
-            detector.clip_videos()
+            detector = Detector(video_paths, logger=self.stdout.write, **options)
 
-
+        write_comma = False  # Hacky sorry
+        with open(options['results'], 'w') as results:
+            results.write("[")
+        try:
+            for data in detector.detect_loop():
+                with open(options['results'], 'a') as results:
+                    if write_comma:
+                        results.write(',')
+                    else:
+                        write_comma = True
+                    json.dump(data, results)
+        finally:
+            with open(options['results'], 'a') as results:
+                    results.write("]")
 

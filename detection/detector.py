@@ -3,8 +3,8 @@
 
 from dataclasses import dataclass
 from datetime import timedelta
+from rest_framework import serializers
 from enum import Enum
-from functools import cached_property
 from json import load
 import os
 
@@ -17,10 +17,9 @@ from trainspotting.utils import Video, concat_clip
 
 
 class Clip:
-    def __init__(self, video, frame) -> None:
+    def __init__(self, video) -> None:
         self.video = video
         self.start = video.pos_milli
-        self.start_frame = frame
         self.end = None
         self.end_frame = None
         self.path = None
@@ -34,17 +33,27 @@ class Clip:
         return self.end - self.start
 
     @property
+    def start_datetime(self):
+        return self.video.pos_datetime + timedelta(milliseconds=self.start)
+
+    @property
     def outfile(self):
-        return f"{self.video.pos_datetime.strftime('%F_%H%M%S')}.mp4"
-    
+        return f"{self.start_datetime.strftime('%F_%H%M%S')}.mp4"
+
     def clip(self, destination):
         destination = os.path.join(destination, self.outfile)
-        self.video.clip_by_frame(destination, start_frame=self.start_frame, end_frame=self.end_frame)
+        self.video.clip_by_milli(destination, start_milli=self.start, end_milli=self.end)
         return destination
     
     def __str__(self) -> str:
         return f"{self.video.filename} [{timedelta(milliseconds=self.start)} - {timedelta(milliseconds=self.end) if self.end else 'End'}]{' (to be merged)' if self.merge_to else ''}"
     
+
+class ClipSerializer(serializers.Serializer):
+    start = serializers.IntegerField()
+    end = serializers.IntegerField()
+    merge_to = serializers.CharField()
+
 
 @dataclass
 class DetectorParams:
@@ -92,12 +101,7 @@ class Detector:
         
         self.unfinished_clip = None
         self.counter = 0
-        self.clips = []
-
-
-    @property
-    def num_clips(self):
-        return len(self.clips)
+        self.data = {}
 
     def sort_video_paths(self, video_paths):
         """Sort video paths."""
@@ -139,13 +143,16 @@ class Detector:
         else:
             return Motion.UNKNOWN
 
-    def process_videos(self):
-        """Runs a processing loop for all videos, wiping unfinished clips in the case of a gap in time."""
+    def detect_loop(self):
+        """
+        A generator that process each video, returning the resulting data.
+        It wiped unfinished clips in the case of a gap in time.
+        """
         for gap, video in self.videos:
             if gap and self.unfinished_clip is not None:
                 self.log(f"  Found gap, unable to finish clip: {self.unfinished_clip.path}")
                 self.unfinished = None
-            self.process_video(video)
+            yield {video.path: ClipSerializer(self.process_video(video), many=True).data}
 
     def process_video(self, video):
         """Loop through a single video and look for clips."""
@@ -153,6 +160,7 @@ class Detector:
         tail_frames = video.fps * self.params.buffer
         minlength = self.params.buffer + self.params.minlength 
         stills = 0
+        clips = []
         clip = None
         if self.unfinished_clip is not None:
             self.log(f"    Found unfinished clip, seeking matching frame...")
@@ -174,7 +182,7 @@ class Detector:
             self.log(f"    Progress: {timedelta(milliseconds=video.pos_milli)} | {status}", ending="\r")
 
             if clip is None and motion == Motion.MOTION:  # Start capturing
-                clip = Clip(video, frame1)
+                clip = Clip(video)
                 clip.buff_start(self.params.buffer)
 
             elif clip is not None:
@@ -187,7 +195,7 @@ class Detector:
                         stills = 0
                         clip.end = video.pos_milli
                         if clip.duration >= minlength * 1000:
-                            self.clips.append(clip)
+                            clips.append(clip)
                         clip = None
             
             frame0 = frame1
@@ -196,7 +204,8 @@ class Detector:
         # Stash an unfinished clip
         if clip is not None:
             self.unfinished_clip = clip
-            self.clips.append(clip)
+            clips.append(clip)
+        return clips
 
     def seek_matching_frame(self, video, frame):
         """Find the first frame that matches the given frame and set up a clip at that point."""
@@ -226,7 +235,7 @@ class Detector:
             diff = self.compare_images(frame, img)
             if diff == 0.0:
                 _, frame = video.cap.read()
-                clip = Clip(video, frame)
+                clip = Clip(video)
                 clip.start = clip.start + offset
                 break
         
