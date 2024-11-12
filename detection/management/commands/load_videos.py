@@ -10,6 +10,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('videos', nargs="+")
+        parser.add_argument('-c', '--camera', required=True)
+
 
     def handle(self, *args, **options):
         video_paths = options.pop("videos")
@@ -18,7 +20,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Processing {num_videos} videos...")
         for i, video_path in enumerate(video_paths):
             self.stdout.write(f"  Progress: {i + 1} of {num_videos} videos", ending="\r")
-            video = Video(file=video_path, camera=self.params.camera)
+            video = Video(file=video_path, camera=options['camera'])
             video.init(save=False)
             video.start = timezone.make_aware(datetime.strptime(video.filename, "VID_%Y%m%d_%H%M%S"))
             videos.append(video)
