@@ -59,10 +59,6 @@ class Detector:
         self.counter = 0
         self.data = {}
 
-    def sort_video_paths(self, video_paths):
-        """Sort video paths."""
-        return sorted(video_paths)
-
     def process_frame(self, frame, box):
         """Perform preprocessing operations on an image"""
         (x1, y1), (x2, y2) = box
@@ -96,6 +92,7 @@ class Detector:
         """
         self.log(f"Processing {self.num_videos} videos...")
         previous_end = None
+        stubs = []
         for video in self.videos:
             gap = previous_end is None or video.start > previous_end
             if gap and self.unfinished_stub is not None:
@@ -105,9 +102,10 @@ class Detector:
             previous_end = video.end
             video.release()
             if save:
-                return ClipStub.objects.bulk_create(stubs_to_create)
+                stubs += ClipStub.objects.bulk_create(stubs_to_create)
             else:
-                return stubs_to_create
+                stubs += stubs_to_create
+        return stubs
 
     def process_video(self, video):
         """Loop through a single video and look for clips."""
