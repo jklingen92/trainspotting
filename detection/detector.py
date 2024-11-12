@@ -15,7 +15,7 @@ from detection.utils import ImageInterface
 
 @dataclass
 class DetectorParams:
-    location: str = ""
+    camera: str = ""
     buffer: int = 5
     minlength: int = 5
     upper: float = 5
@@ -68,7 +68,7 @@ class Detector:
         return sorted(video_paths)
     
     def create_video(self, video_path, save=True):
-        video = Video(file=video_path, location=self.params.location)
+        video = Video(file=video_path, camera=self.params.camera)
         video.init(save=False)
         video.start = timezone.make_aware(datetime.strptime(video.filename, "VID_%Y%m%d_%H%M%S"))
         if save:

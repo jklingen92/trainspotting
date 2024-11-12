@@ -13,7 +13,7 @@ class Video(models.Model):
 
     file = models.FileField(null=True)
     filename = models.CharField(max_length=240)
-    location = models.CharField(max_length=120)
+    camera = models.CharField(max_length=120)
     start = models.DateTimeField()
     fps = models.PositiveSmallIntegerField()
     frame_count = models.PositiveSmallIntegerField()
@@ -102,7 +102,7 @@ class ClipStub(models.Model):
     end = models.PositiveSmallIntegerField()  # milli
     clip = models.ForeignKey(Clip, null=True, on_delete=models.SET_NULL, related_name="stubs")
     merge_to = models.ForeignKey("detection.ClipStub", null=True, on_delete=models.SET_NULL)
-    end_frame = models.ImageField()
+    end_frame = models.ImageField(null=True)
 
     def buff_start(self, buffer, save=True):
         self.start = max(self.start - (buffer * 1000), 0)

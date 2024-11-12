@@ -10,6 +10,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('videos', nargs="+")
+        parser.add_argument('-c', '--camera', default="camera", type=str)
         parser.add_argument('-u', '--upper', default=5, type=float)
         parser.add_argument('-l', '--lower', default=1, type=float)
         parser.add_argument('-m', '--minlength', default=5, type=int)
