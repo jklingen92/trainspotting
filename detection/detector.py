@@ -159,7 +159,6 @@ class Detector:
                 clip_stub = ClipStub(video=video, start=video.pos_milli)
                 clip_stub.buff_start(self.params.buffer, save=False)
             elif clip_stub is not None:
-                clip_stub.end_frame = frame1
                 if motion == Motion.MOTION:
                     stills = 0
                 elif motion == Motion.STILL:
