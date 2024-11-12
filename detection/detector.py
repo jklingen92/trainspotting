@@ -1,63 +1,21 @@
-
-
-
+import os
 from dataclasses import dataclass
-from datetime import timedelta
-from rest_framework import serializers
+from datetime import datetime, timedelta
 from enum import Enum
 from json import load
-import os
 
 import cv2
 import numpy as np
+from django.utils import timezone
+from PIL import Image
 
+from detection.models import ClipStub, Video
 from detection.utils import ImageInterface
-from trainspotting.utils import Video, concat_clip
-
-
-
-class Clip:
-    def __init__(self, video) -> None:
-        self.video = video
-        self.start = video.pos_milli
-        self.end = None
-        self.end_frame = None
-        self.path = None
-        self.merge_to = None
-
-    def buff_start(self, buffer):
-        self.start = max(self.start - (buffer * 1000), 0)
-
-    @property
-    def duration(self):
-        return self.end - self.start
-
-    @property
-    def start_datetime(self):
-        return self.video.pos_datetime + timedelta(milliseconds=self.start)
-
-    @property
-    def outfile(self):
-        return f"{self.start_datetime.strftime('%F_%H%M%S')}.mp4"
-
-    def clip(self, destination):
-        destination = os.path.join(destination, self.outfile)
-        self.video.clip_by_milli(destination, start_milli=self.start, end_milli=self.end)
-        return destination
-    
-    def __str__(self) -> str:
-        return f"{self.video.filename} [{timedelta(milliseconds=self.start)} - {timedelta(milliseconds=self.end) if self.end else 'End'}]{' (to be merged)' if self.merge_to else ''}"
-    
-
-class ClipSerializer(serializers.Serializer):
-    start = serializers.IntegerField()
-    end = serializers.IntegerField()
-    merge_to = serializers.CharField()
 
 
 @dataclass
 class DetectorParams:
-    destination: str = ""
+    location: str = ""
     buffer: int = 5
     minlength: int = 5
     upper: float = 5
@@ -71,7 +29,7 @@ class Motion(Enum):
 
 
 class Detector:
-    """Detector manages a detection task, including managing the videos and clipping them."""
+    """Detector takes a batch of videos and detects motion in them, producing clips."""
 
     def __init__(self, video_paths, logger=None, **params) -> None:
 
@@ -86,10 +44,12 @@ class Detector:
 
         self.num_videos = len(video_paths)
         self.video_paths = self.sort_video_paths(video_paths)
-        success, first_frame = Video(self.video_paths[0]).read()
+        first_video = self.create_video(self.video_paths.pop(0), save=False)
+        success, first_frame = first_video.read()
         if not success:
             raise Exception(f"First video has no frames!")
-        
+        first_video.release()
+
         self.first_frame_interface = ImageInterface(first_frame)
         self.detect_box = self.first_frame_interface.get_bounding_box(
             title="Select a region for detection, or leave blank to use the full frame",
@@ -99,23 +59,32 @@ class Detector:
         self.log(f"Processing {self.num_videos} videos...")
         self.videos = self.video_generator(video_paths)
         
-        self.unfinished_clip = None
+        self.unfinished_stub = None
         self.counter = 0
         self.data = {}
 
     def sort_video_paths(self, video_paths):
         """Sort video paths."""
         return sorted(video_paths)
+    
+    def create_video(self, video_path, save=True):
+        video = Video(file=video_path, location=self.params.location)
+        video.init(save=False)
+        video.start = timezone.make_aware(datetime.strptime(video.filename, "VID_%Y%m%d_%H%M%S"))
+        if save:
+            video.save()
+        return video
 
     def video_generator(self, video_paths):
         """Create a lazy generator that returns Videos based on paths"""
         last_video_end = None
         for i, video_path in enumerate(video_paths):
             self.counter = i
-            video = Video(video_path)
+            video = self.create_video(video_path)
             gap = last_video_end is None or last_video_end > video.start
             yield gap, video
             last_video_end = video.end
+            video.release()
 
     def process_frame(self, frame, box):
         """Perform preprocessing operations on an image"""
@@ -143,34 +112,35 @@ class Detector:
         else:
             return Motion.UNKNOWN
 
-    def detect_loop(self):
+    def detect_loop(self, save=True):
         """
         A generator that process each video, returning the resulting data.
         It wiped unfinished clips in the case of a gap in time.
         """
         for gap, video in self.videos:
-            if gap and self.unfinished_clip is not None:
-                self.log(f"  Found gap, unable to finish clip: {self.unfinished_clip.path}")
+            if gap and self.unfinished_stub is not None:
+                self.log(f"  Found gap, unable to finish clip: {self.unfinished_stub.path}")
                 self.unfinished = None
-            clips = self.process_video(video)
-            if clips:
-                yield {video.path: ClipSerializer(clips, many=True).data}
+            stubs_to_create = self.process_video(video)
+            video.release()
+            if save:
+                return ClipStub.objects.bulk_create(stubs_to_create)
             else:
-                yield None
+                return stubs_to_create
 
     def process_video(self, video):
         """Loop through a single video and look for clips."""
-        self.log(f"  Processing video {self.counter + 1} of {self.num_videos}: {video.path}", ending="\n")
+        self.log(f"  Processing video {self.counter + 1} of {self.num_videos}: {video.file.path}", ending="\n")
         tail_frames = video.fps * self.params.buffer
         minlength = self.params.buffer + self.params.minlength 
         stills = 0
-        clips = []
-        clip = None
-        if self.unfinished_clip is not None:
+        stubs = []
+        clip_stub = None
+        if self.unfinished_stub is not None:
             self.log(f"    Found unfinished clip, seeking matching frame...")
-            frame0, clip = self.seek_matching_frame(video, self.unfinished_clip.end_frame)
-            clip.merge_to = self.unfinished_clip.path
-            self.unfinished_clip = None
+            frame0, clip_stub = self.seek_matching_frame(video, self.unfinished_stub.end_frame)
+            clip_stub.merge_to = self.unfinished_stub
+            self.unfinished_stub = None
         else:
             success, frame0 = video.read()
         
@@ -179,37 +149,37 @@ class Detector:
         while success:
             motion = self.detect_motion(frame0, frame1)
 
-            if clip is not None:
-                status = f"    Capturing: {timedelta(milliseconds=video.pos_milli - clip.start)} | Stills: {stills:4d}"
+            if clip_stub is not None:
+                status = f"    Capturing: {timedelta(milliseconds=video.pos_milli - clip_stub.start)} | Stills: {stills:4d}"
             else:
                 status = "-" * 30
             self.log(f"    Progress: {timedelta(milliseconds=video.pos_milli)} | {status}", ending="\r")
 
-            if clip is None and motion == Motion.MOTION:  # Start capturing
-                clip = Clip(video)
-                clip.buff_start(self.params.buffer)
-
-            elif clip is not None:
-                clip.end_frame = frame1
+            if clip_stub is None and motion == Motion.MOTION:  # Start capturing
+                clip_stub = ClipStub(video=video, start=video.pos_milli)
+                clip_stub.buff_start(self.params.buffer, save=False)
+            elif clip_stub is not None:
+                clip_stub.end_frame = frame1
                 if motion == Motion.MOTION:
                     stills = 0
                 elif motion == Motion.STILL:
                     stills += 1
                     if stills >= tail_frames:
                         stills = 0
-                        clip.end = video.pos_milli
-                        if clip.duration >= minlength * 1000:
-                            clips.append(clip)
-                        clip = None
+                        clip_stub.end = video.pos_milli
+                        if clip_stub.duration >= minlength * 1000:
+                            stubs.append(clip_stub)
+                        clip_stub = None
             
             frame0 = frame1
             success, frame1 = video.read()
 
         # Stash an unfinished clip
-        if clip is not None:
-            self.unfinished_clip = clip
-            clips.append(clip)
-        return clips
+        if clip_stub is not None:
+            clip_stub.end_frame = Image.from_array(frame0)
+            self.unfinished_stub = clip_stub
+            stubs.append(clip_stub)
+        return stubs
 
     def seek_matching_frame(self, video, frame):
         """Find the first frame that matches the given frame and set up a clip at that point."""
@@ -231,32 +201,20 @@ class Detector:
 
         # Seek the frame
         while True:
-            success, img = video.cap.read()
 
+            success, img = video.read()
             if not success:
                 raise Exception("Did not find matching frame.")
 
             diff = self.compare_images(frame, img)
             if diff == 0.0:
-                _, frame = video.cap.read()
-                clip = Clip(video)
-                clip.start = clip.start + offset
+                _, frame = video.read()
+                clip_stub = ClipStub(video=video, start=video.pos_milli)
+                clip_stub.start = clip_stub.start + offset
                 break
         
-        return frame, clip
-    
-    def clip_videos(self):
-        """Clip videos based on motion detection."""
-        for i, clip in enumerate(self.clips):
-            self.log(f"  Clipping {i + 1} of {self.num_clips}: {clip}")
-            if not self.params.fake:
-                outfile = clip.clip(self.params.destination)
-
-                if clip.merge_to is not None and not self.params.nomerge:
-                    self.log(f"  Merging clip to {clip.merge_to.split('/')[-1]}")
-                    concat_clip(clip.merge_to, outfile)
-
-                
+        return frame, clip_stub
+        
 
 class ExclusionDetector(Detector):
     """
