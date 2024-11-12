@@ -31,7 +31,7 @@ class Motion(Enum):
 class Detector:
     """Detector takes a batch of videos and detects motion in them, producing clips."""
 
-    def __init__(self, video_paths, logger=None, **params) -> None:
+    def __init__(self, videos, logger=None, **params) -> None:
 
         def log(msg, **kwargs):
             if logger is not None:
@@ -42,22 +42,18 @@ class Detector:
         self.log = log
         self.params = DetectorParams(params)
 
-        self.num_videos = len(video_paths)
-        self.video_paths = self.sort_video_paths(video_paths)
-        first_video = self.create_video(self.video_paths.pop(0), save=False)
-        success, first_frame = first_video.read()
+        self.videos = videos.order_by("start")
+        self.num_videos = videos.count()
+        success, first_frame = self.videos.first().read()
         if not success:
             raise Exception(f"First video has no frames!")
-        first_video.release()
+        self.videos.first().release()
 
         self.first_frame_interface = ImageInterface(first_frame)
         self.detect_box = self.first_frame_interface.get_bounding_box(
             title="Select a region for detection, or leave blank to use the full frame",
             defaults=((0, 0), (self.first_frame_interface.width, self.first_frame_interface.height))
         )
-
-        self.log(f"Processing {self.num_videos} videos...")
-        self.videos = self.video_generator(video_paths)
         
         self.unfinished_stub = None
         self.counter = 0
@@ -66,25 +62,6 @@ class Detector:
     def sort_video_paths(self, video_paths):
         """Sort video paths."""
         return sorted(video_paths)
-    
-    def create_video(self, video_path, save=True):
-        video = Video(file=video_path, camera=self.params.camera)
-        video.init(save=False)
-        video.start = timezone.make_aware(datetime.strptime(video.filename, "VID_%Y%m%d_%H%M%S"))
-        if save:
-            video.save()
-        return video
-
-    def video_generator(self, video_paths):
-        """Create a lazy generator that returns Videos based on paths"""
-        last_video_end = None
-        for i, video_path in enumerate(video_paths):
-            self.counter = i
-            video = self.create_video(video_path)
-            gap = last_video_end is None or last_video_end > video.start
-            yield gap, video
-            last_video_end = video.end
-            video.release()
 
     def process_frame(self, frame, box):
         """Perform preprocessing operations on an image"""
@@ -117,11 +94,15 @@ class Detector:
         A generator that process each video, returning the resulting data.
         It wiped unfinished clips in the case of a gap in time.
         """
-        for gap, video in self.videos:
+        self.log(f"Processing {self.num_videos} videos...")
+        previous_end = None
+        for video in self.videos:
+            gap = previous_end is None or video.start > previous_end
             if gap and self.unfinished_stub is not None:
                 self.log(f"  Found gap, unable to finish clip: {self.unfinished_stub.path}")
                 self.unfinished = None
             stubs_to_create = self.process_video(video)
+            previous_end = video.end
             video.release()
             if save:
                 return ClipStub.objects.bulk_create(stubs_to_create)
@@ -222,8 +203,8 @@ class ExclusionDetector(Detector):
     If movement is detected in the detection region as well as in the exclusion region, it will be ignored.
     """    
     
-    def __init__(self, video_paths, log=None, **params) -> None:
-        super().__init__(video_paths, log, **params)
+    def __init__(self, videos, log=None, **params) -> None:
+        super().__init__(videos, log, **params)
         self.exclude_box = self.first_frame_interface.get_bounding_box(
             title="Select a region for exclusion, or leave blank for None",
             color="red"
