@@ -98,8 +98,8 @@ class Clip(models.Model):
 class ClipStub(models.Model):
 
     video = models.ForeignKey(Video, null=True, on_delete=models.CASCADE, related_name="clip_stubs")
-    start = models.PositiveSmallIntegerField()  # milli
-    end = models.PositiveSmallIntegerField()  # milli
+    start = models.FloatField()  # milli
+    end = models.FloatField()  # milli
     clip = models.ForeignKey(Clip, null=True, on_delete=models.SET_NULL, related_name="stubs")
     merge_to = models.ForeignKey("detection.ClipStub", null=True, on_delete=models.SET_NULL)
     end_frame = models.ImageField(null=True)
