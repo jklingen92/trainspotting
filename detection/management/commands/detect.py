@@ -30,12 +30,13 @@ class Command(BaseCommand):
             results.write("[")
         try:
             for data in detector.detect_loop():
-                with open(options['results'], 'a') as results:
-                    if write_comma:
-                        results.write(',')
-                    else:
-                        write_comma = True
-                    json.dump(data, results)
+                if data:
+                    with open(options['results'], 'a') as results:
+                        if write_comma:
+                            results.write(',')
+                        else:
+                            write_comma = True
+                        json.dump(data, results)
         finally:
             with open(options['results'], 'a') as results:
                     results.write("]")

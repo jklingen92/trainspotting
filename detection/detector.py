@@ -152,7 +152,11 @@ class Detector:
             if gap and self.unfinished_clip is not None:
                 self.log(f"  Found gap, unable to finish clip: {self.unfinished_clip.path}")
                 self.unfinished = None
-            yield {video.path: ClipSerializer(self.process_video(video), many=True).data}
+            clips = self.process_video(video)
+            if clips:
+                yield {video.path: ClipSerializer(clips, many=True).data}
+            else:
+                yield None
 
     def process_video(self, video):
         """Loop through a single video and look for clips."""
