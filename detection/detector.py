@@ -155,7 +155,7 @@ class Detector:
 
         # Stash an unfinished clip
         if clip_stub is not None:
-            clip_stub.end_frame = Image.from_array(frame0)
+            clip_stub.end_frame = Image.fromarray(frame0)
             self.unfinished_stub = clip_stub
             stubs.append(clip_stub)
         return stubs

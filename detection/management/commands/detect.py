@@ -21,5 +21,9 @@ class Command(BaseCommand):
                     f.write(f"{msg}\n")
         
         detector = Detector(videos, logger=logger)
-        stubs = detector.detect_loop()
-        logger(f"Created {len(stubs)} stubs!")
+        try:
+            stubs = detector.detect_loop()
+            logger(f"Created {len(stubs)} stubs!")
+
+        except Exception as e:
+            logger(e)
