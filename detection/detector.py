@@ -101,6 +101,7 @@ class Detector:
             stubs_to_create = self.process_video(video)
             previous_end = video.end
             video.release()
+            self.counter += 1
             if save:
                 stubs += ClipStub.objects.bulk_create(stubs_to_create)
             else:
