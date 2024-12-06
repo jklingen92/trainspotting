@@ -1,6 +1,7 @@
+import io
 import matplotlib.pyplot as plt
-
-from datetime import timedelta
+from PIL import Image
+from django.core.files.uploadedfile import InMemoryUploadedFile
 from matplotlib.patches import Rectangle
 
 
@@ -8,7 +9,8 @@ class ImageInterface:
     def __init__(self, image):
         self.image = image
         self.bounding_box = None
-        (self.width, self.height, _) = self.image.shape
+        self.width = self.image.width
+        self.height = self.image.height
 
     class TwoClickSelector:
         def __init__(self, ax, callback):
@@ -78,3 +80,19 @@ class ImageInterface:
         self.bounding_box = None
         return bounding_box
 
+
+def image_from_array(name, array):
+    image_stream = io.BytesIO()
+    img = Image.fromarray(array)
+    img.save(image_stream, format='PNG')
+    image_stream.seek(0)
+   
+    # Create Django file object
+    return InMemoryUploadedFile(
+        file=image_stream, 
+        field_name=None,
+        name=name,
+        content_type='image/png',
+        size=image_stream.getbuffer().nbytes,
+        charset=None
+    )

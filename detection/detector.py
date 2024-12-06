@@ -1,16 +1,16 @@
+import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from enum import Enum
 from json import load
 
 import cv2
 import numpy as np
-from django.utils import timezone
 from PIL import Image
 
-from detection.models import ClipStub, Video
-from detection.utils import ImageInterface
+from detection.models import Clip
+
 
 
 @dataclass
@@ -29,39 +29,27 @@ class Motion(Enum):
 
 
 class Detector:
-    """Detector takes a batch of videos and detects motion in them, producing clips."""
+    """Detector takes a batch of videos processing tasks and detects motion in them, producing clip stubs."""
 
-    def __init__(self, videos, logger=None, **params) -> None:
-
-        def log(msg, **kwargs):
-            if logger is not None:
-                logger(msg, **kwargs)
-            else:
-                print(msg)
-
-        self.log = log
-        self.params = DetectorParams(params)
-
-        self.videos = videos.order_by("start")
-        self.num_videos = videos.count()
-        success, first_frame = self.videos.first().read()
-        if not success:
-            raise Exception(f"First video has no frames!")
-        self.videos.first().release()
-
-        self.first_frame_interface = ImageInterface(first_frame)
-        self.detect_box = self.first_frame_interface.get_bounding_box(
-            title="Select a region for detection, or leave blank to use the full frame",
-            defaults=((0, 0), (self.first_frame_interface.width, self.first_frame_interface.height))
-        )
+    def __init__(self, detect_task, logger=None, **params) -> None:
         
+        if logger is None:
+            self.logger = logging.getLogger('django')
+        else:
+            self.logger = logger
+
+        self.params = DetectorParams(params)
+        self.detect_task = detect_task
+        self.processing_tasks = detect_task.import_task.processing_tasks.order_by("video__start")
+        self.camera = detect_task.camera
+
         self.unfinished_stub = None
         self.counter = 0
         self.data = {}
 
     def process_frame(self, frame, box):
         """Perform preprocessing operations on an image"""
-        (x1, y1), (x2, y2) = box
+        (x1, y1), (x2, y2) = box.coords
         frame = frame[y1:y2, x1:x2]
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         frame = cv2.GaussianBlur(frame, (21, 21), 0)
@@ -73,10 +61,10 @@ class Detector:
         score = np.mean(diff)
         return score
     
-    def detect_motion(self, frame0, frame1):
+    def detect_motion(self, image0, image1):
         """Compare two frames and return motion classification."""
-        detect0 = self.process_frame(frame0, self.detect_box)
-        detect1 = self.process_frame(frame1, self.detect_box)
+        detect0 = self.process_frame(image0, self.detect_task.detect)
+        detect1 = self.process_frame(image1, self.detect_task.detect)
         detect_score = self.compare_images(detect0, detect1)
         if detect_score >= self.params.upper:
             return Motion.MOTION
@@ -87,84 +75,80 @@ class Detector:
 
     def detect_loop(self, save=True):
         """
-        A generator that process each video, returning the resulting data.
-        It wiped unfinished clips in the case of a gap in time.
+        Loops through each video processing task and runs the detect code on it. Also check for
+        continuous detect actions that straddle clips, if clips are sequential.
         """
-        self.log(f"Processing {self.num_videos} videos...")
+        self.logger.info(f"Processing {self.processing_tasks.count()} videos...")
         previous_end = None
-        stubs = []
-        for video in self.videos:
-            gap = previous_end is None or video.start > previous_end
+        for task in self.processing_tasks.all():
+            gap = previous_end is None or task.video.start > previous_end
             if gap and self.unfinished_stub is not None:
-                self.log(f"  Found gap, unable to finish clip: {self.unfinished_stub.path}")
+                self.logger.warning(f"  Found gap, unable to finish clip: {self.unfinished_stub.path}")
                 self.unfinished = None
-            stubs_to_create = self.process_video(video)
-            previous_end = video.end
-            video.release()
+            stubs_to_create = self.process_video(task)
+            previous_end = task.video.end  # This should be populated at the end of the video capture
+            task.release()
             self.counter += 1
             if save:
-                stubs += ClipStub.objects.bulk_create(stubs_to_create)
-            else:
-                stubs += stubs_to_create
-        return stubs
+                Clip.objects.bulk_create(stubs_to_create)
 
-    def process_video(self, video):
+    def process_video(self, task):
         """Loop through a single video and look for clips."""
-        self.log(f"  Processing video {self.counter + 1} of {self.num_videos}: {video.file.path}", ending="\n")
-        tail_frames = video.fps * self.params.buffer
+        self.logger.info(f"  Processing video {self.counter + 1} of {self.processing_tasks.count()}: {task.video.filename}")
+        tail_frames = task.video.fps * self.params.buffer
         minlength = self.params.buffer + self.params.minlength 
         stills = 0
         stubs = []
         clip_stub = None
         if self.unfinished_stub is not None:
-            self.log(f"    Found unfinished clip, seeking matching frame...")
-            frame0, clip_stub = self.seek_matching_frame(video, self.unfinished_stub.end_frame)
+            self.logger.info(f"    Found unfinished clip, seeking matching frame...")
+            frame0, clip_stub = self.seek_matching_image(task.video, self.unfinished_stub.end_frame)
             clip_stub.merge_to = self.unfinished_stub
             self.unfinished_stub = None
         else:
-            success, frame0 = video.read()
+            frame0 = task.read()
         
-        success, frame1 = video.read()
+        frame1 = task.read()
             
-        while success:
-            motion = self.detect_motion(frame0, frame1)
+        while frame1 is not None:
+            motion = self.detect_motion(frame0.image, frame1.image)
 
-            if clip_stub is not None:
-                status = f"    Capturing: {timedelta(milliseconds=video.pos_milli - clip_stub.start)} | Stills: {stills:4d}"
-            else:
-                status = "-" * 30
-            self.log(f"    Progress: {timedelta(milliseconds=video.pos_milli)} | {status}", ending="\r")
+            # if clip_stub is not None:
+            #     status = f"    Capturing: {timedelta(milliseconds=frame1.milliseconds - clip_stub.start)} | Stills: {stills:4d}"
+            # else:
+            #     status = "-" * 30
+            # self.logger.info(f"    Progress: {timedelta(milliseconds=frame1.milliseconds)} | {status}")
 
             if clip_stub is None and motion == Motion.MOTION:  # Start capturing
-                clip_stub = ClipStub(video=video, start=video.pos_milli)
+                clip_stub = Clip(video=task.video, detect_task=self.detect_task, start=frame1.milliseconds)
                 clip_stub.buff_start(self.params.buffer, save=False)
             elif clip_stub is not None:
                 if motion == Motion.MOTION:
                     stills = 0
                 elif motion == Motion.STILL:
                     stills += 1
-                    if stills >= tail_frames:
+                    if stills >= tail_frames:  # Stop Capturing
                         stills = 0
-                        clip_stub.end = video.pos_milli
+                        clip_stub.end = frame1.milliseconds
                         if clip_stub.duration >= minlength * 1000:
                             stubs.append(clip_stub)
                         clip_stub = None
             
             frame0 = frame1
-            success, frame1 = video.read()
+            frame1 = task.read()
 
         # Stash an unfinished clip
         if clip_stub is not None:
-            clip_stub.end_frame = Image.fromarray(frame0)
+            clip_stub.end_frame = Image.fromarray(frame0.image)
             self.unfinished_stub = clip_stub
             stubs.append(clip_stub)
         return stubs
 
-    def seek_matching_frame(self, video, frame):
-        """Find the first frame that matches the given frame and set up a clip at that point."""
+    def seek_matching_image(self, task, image_match):
+        """Find the first frame that matches the given image and set up a clip at that point."""
         
         # Get the video offset
-        os.system(f'ffprobe -show_entries stream=codec_type,start_time -v 0 -of json {video.path} >> offsets.json')
+        os.system(f'ffprobe -show_entries stream=codec_type,start_time -v 0 -of json {task.file.path} >> offsets.json')
         with open("offsets.json") as f:
             offsets = load(f)
         os.system(f"rm -f offsets.json")
@@ -181,14 +165,14 @@ class Detector:
         # Seek the frame
         while True:
 
-            success, img = video.read()
-            if not success:
+            frame = task.read()
+            if frame is None:
                 raise Exception("Did not find matching frame.")
 
-            diff = self.compare_images(frame, img)
+            diff = self.compare_images(image_match, frame.image)
             if diff == 0.0:
-                _, frame = video.read()
-                clip_stub = ClipStub(video=video, start=video.pos_milli)
+                frame = task.read()
+                clip_stub = Clip(video=task.video, detect_task=self.detect_task, start=frame.milliseconds)
                 clip_stub.start = clip_stub.start + offset
                 break
         
@@ -201,19 +185,12 @@ class ExclusionDetector(Detector):
     
     If movement is detected in the detection region as well as in the exclusion region, it will be ignored.
     """    
-    
-    def __init__(self, videos, log=None, **params) -> None:
-        super().__init__(videos, log, **params)
-        self.exclude_box = self.first_frame_interface.get_bounding_box(
-            title="Select a region for exclusion, or leave blank for None",
-            color="red"
-        )
 
-    def detect_motion(self, frame0, frame1):
-        detect_classification = super().detect_motion(frame0, frame1)
+    def detect_motion(self, image0, image1):
+        detect_classification = super().detect_motion(image0, image1)
 
-        exclude0 = self.process_frame(frame0, self.exclude_box)
-        exclude1 = self.process_frame(frame1, self.exclude_box)
+        exclude0 = self.process_frame(image0, self.detect_task.exclude)
+        exclude1 = self.process_frame(image1, self.detect_task.exclude)
         exclude_score = self.compare_images(exclude0, exclude1)
         if exclude_score > self.params.upper:
             return Motion.STILL

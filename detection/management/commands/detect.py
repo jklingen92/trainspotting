@@ -1,29 +1,50 @@
-from typing import Any
-from django.core.management.base import BaseCommand, CommandParser
-from detection.detector import Detector
-from detection.models import Video
+from detection.detector import Detector, ExclusionDetector
+from detection.models import DetectTask, ImportTask
+from detection.utils import image_from_array
+from trainspotting.utils import BaseLoggingCommand
+from django.core.management.base import CommandError
 
 
-class Command(BaseCommand):
-    help = "Runs detect loop on all videos with files attached"
+class Command(BaseLoggingCommand):
+    help = "Runs detect loop on batch of imported videos."
 
     def add_arguments(self, parser):
-        parser.add_argument('-l', '--log')
+        super().add_arguments(parser)
+        parser.add_argument('import', type=int)
 
     def handle(self, *args, **options):
-        videos = Video.objects.exclude(file=None)
+        logger = self._configure_logger(options)
 
-        def logger(msg, **kwargs):
-            if kwargs.get("ending", None) == "\r":
-                return
-            else:
-                with open(options["log"], "a") as f:
-                    f.write(f"{msg}\n")
-        
-        detector = Detector(videos, logger=logger)
         try:
-            stubs = detector.detect_loop()
-            logger(f"Created {len(stubs)} stubs!")
+            import_task = ImportTask.objects.get(id=options["import"])
+        except ImportTask.DoesNotExist as e:
+            raise CommandError(e)
+
+        first_processing_task = import_task.processing_tasks.first()
+        first_frame = first_processing_task.read()
+        first_processing_task.release()
+
+        sample_name = f"{first_processing_task.video.filename}_sample.png"
+        detect_task, created = DetectTask.objects.get_or_create(
+            import_task=import_task,
+            defaults={
+                "sample": image_from_array(sample_name, first_frame.image)
+            }
+        )
+        
+        detect_task.detect = detect_task.get_bounding_box("Select a detection area or leave blank for the full area")
+        detect_task.exclude = detect_task.get_bounding_box("Select an exclusion area or leave blank for no exclusion")
+        detect_task.save()
+
+        if detect_task.exclude is None:
+            detector = Detector(detect_task, logger=logger)
+        else:
+            detector = ExclusionDetector(detect_task, logger=logger)
+
+        try:
+            detector.detect_loop()
+            logger.info(f"Created {detect_task.clips.count()} stubs")
 
         except Exception as e:
-            logger(e)
+            logger.error(e)
+            raise e
