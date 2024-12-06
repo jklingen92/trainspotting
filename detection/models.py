@@ -11,7 +11,7 @@ from django_extensions.db.models import TimeStampedModel
 from PIL import Image
 
 from detection.utils import ImageInterface
-from trainspotting.utils import concat_clip
+from trainspotting.utils import concat_clips
 
 
 @dataclass
@@ -135,7 +135,7 @@ class VideoProcessingTask(TimeStampedModel):
     def seek_milli(self, milli):
         self.cap.set(cv2.CAP_PROP_POS_MSEC, milli)
 
-    def clip_by_milli(self, outfile, start_milli=0, end_milli=None):
+    def extract_by_milli(self, outfile, start_milli=0, end_milli=None):
         end_str = ""
         if end_milli is not None:
             end_str = f"-to '{end_milli}ms'"
@@ -160,6 +160,7 @@ class DetectTask(TimeStampedModel):
 
     import_task = models.ForeignKey(ImportTask, on_delete=models.PROTECT)
     sample = models.ImageField(upload_to="samples")
+    view = models.CharField(max_length=120)
     _detect = models.ForeignKey(BoundingBox, null=True, on_delete=models.SET_NULL, related_name="detect_tasks")
     exclude = models.ForeignKey(BoundingBox, null=True, on_delete=models.SET_NULL, related_name="exclude_tasks")
 
@@ -214,14 +215,65 @@ class DetectTask(TimeStampedModel):
         self.save(update_fields=['exclude'])
 
 
+
 class Clip(TimeStampedModel):
+    
+    detect_task = models.ForeignKey(DetectTask, on_delete=models.CASCADE, related_name="clips")
+    file = models.FileField(null=True, upload_to="clips", unique=True)
+
+    @cached_property
+    def duration(self):
+        return sum(fragment.duration for fragment in self.fragments.all())
+    
+    @cached_property
+    def start_datetime(self):
+        return self.first_fragment.start_datetime
+
+    @property
+    def outfile(self):
+        return f"{self.start_datetime.strftime('%F_%H%M%S')}.mp4"
+
+    @property
+    def clip_destination(self):
+        return os.path.join(settings.MEDIA_ROOT, "clips", self.detect_task.camera.name, self.outfile)
+
+    def extract(self, destination):
+        """Extract fragments from videos and merge them if necessary."""
+        fragments_to_merge = []
+        for fragment in self.fragments.order_by("index"):
+            if fragment.index == 0:
+                dest = self.clip_destination
+            else:
+                dest = self.clip_destination + f"_{fragment.index}"
+            fragments_to_merge += dest
+            fragment.extract(dest)
+        if len(fragments_to_merge) > 1:
+            concat_clips(fragments_to_merge)
+        
+        self.file = fragments_to_merge[0]
+        self.save(update_fields=["file"])
+
+    @property
+    def first_fragment(self):
+        return self.fragments.get(index=0).first()
+
+    @property
+    def last_fragment(self):
+        return self.fragments.order_by("index").last()
+
+    def __str__(self) -> str:
+        return f"{self.video.filename} [{timedelta(milliseconds=self.start)} - {timedelta(milliseconds=self.end) if self.end else 'End'}]{' (to be merged)' if self.merge_to else ''}"
+    
+
+
+class ClipFragment(TimeStampedModel):
+    """A single fragment of a clip from a video"""
 
     video = models.ForeignKey(Video, on_delete=models.CASCADE, related_name="clips")
-    detect_task = models.ForeignKey(DetectTask, on_delete=models.CASCADE, related_name="clips")
+    clip = models.ForeignKey(Clip, on_delete=models.CASCADE, related_name="fragments")
+    index = models.PositiveSmallIntegerField(default=0)
     start = models.FloatField()  # milli
     end = models.FloatField(null=True)  # milli
-    file = models.FileField(upload_to="clips", unique=True)
-    merge_to = models.ForeignKey("detection.Clip", null=True, on_delete=models.SET_NULL)
     end_frame = models.ImageField(null=True)
 
     def buff_start(self, buffer, save=True):
@@ -232,35 +284,10 @@ class Clip(TimeStampedModel):
     @property
     def duration(self):
         return self.end - self.start
-    
+
     @property
     def start_datetime(self):
         return self.video.start + timedelta(milliseconds=self.start)
 
-    @property
-    def outfile(self):
-        return f"{self.start_datetime.strftime('%F_%H%M%S')}.mp4"
-
-    def clip(self, destination):
-        """Extract a clip from a video, save it, and link it."""
-        destination = os.path.join(destination, self.outfile)
-        f = self.video.clip_by_milli(destination, start_milli=self.start, end_milli=self.end)
-        if f is None:
-            raise Exception("Video has no file attached")
-        else:
-            self.clip = Clip.objects.create(file=f)
-            self.save()
-
-    def clip_and_merge(self, clip):
-        """Extract a clip from a video and merge it to an existing clip."""
-        f = self.video.clip_by_milli(self.outfile, start_milli=self.start, end_milli=self.end)
-        if f is None:
-            raise Exception("Video has no file attached")
-        else:
-            concat_clip(clip.file.path, f.path)
-            self.clip = clip
-            self.save()
-
-    def __str__(self) -> str:
-        return f"{self.video.filename} [{timedelta(milliseconds=self.start)} - {timedelta(milliseconds=self.end) if self.end else 'End'}]{' (to be merged)' if self.merge_to else ''}"
-    
+    def extract(self, destination):
+        self.video.extract_by_milli(destination, start_milli=self.start,  end_milli=self.end)

@@ -6,7 +6,7 @@ from trainspotting.utils import BaseCameraCommand
 
 
 class Command(BaseCameraCommand):
-    help = "Imports a batch of videos."
+    help = "Imports a batch of videos and creates VideoProcessingTasks."
 
     def add_arguments(self, parser):
         super().add_arguments(parser)
@@ -19,6 +19,8 @@ class Command(BaseCameraCommand):
         video_paths = options.pop("videos")
         num_videos = len(video_paths)
         staging_location = os.path.join(settings.MEDIA_ROOT, 'raw', camera.name)
+        if not os.path.exists(staging_location):
+            os.makedirs(staging_location)
         logger.info(f"Importing {num_videos} videos to {staging_location}:")
         try:
             for i, video_path in enumerate(video_paths):

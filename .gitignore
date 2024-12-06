@@ -1,6 +1,7 @@
 # Video files
 clips
 media
+raw
 
 # Classification training data
 classification/training

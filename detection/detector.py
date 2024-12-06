@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from detection.models import Clip
+from detection.models import Clip, ClipFragment
 
 
 
@@ -43,7 +43,7 @@ class Detector:
         self.processing_tasks = detect_task.import_task.processing_tasks.order_by("video__start")
         self.camera = detect_task.camera
 
-        self.unfinished_stub = None
+        self.clip = None
         self.counter = 0
         self.data = {}
 
@@ -61,10 +61,10 @@ class Detector:
         score = np.mean(diff)
         return score
     
-    def detect_motion(self, image0, image1):
+    def detect_motion(self, frame0, frame1):
         """Compare two frames and return motion classification."""
-        detect0 = self.process_frame(image0, self.detect_task.detect)
-        detect1 = self.process_frame(image1, self.detect_task.detect)
+        detect0 = self.process_frame(frame0, self.detect_task.detect)
+        detect1 = self.process_frame(frame1, self.detect_task.detect)
         detect_score = self.compare_images(detect0, detect1)
         if detect_score >= self.params.upper:
             return Motion.MOTION
@@ -82,15 +82,13 @@ class Detector:
         previous_end = None
         for task in self.processing_tasks.all():
             gap = previous_end is None or task.video.start > previous_end
-            if gap and self.unfinished_stub is not None:
-                self.logger.warning(f"  Found gap, unable to finish clip: {self.unfinished_stub.path}")
-                self.unfinished = None
-            stubs_to_create = self.process_video(task)
+            if gap and self.clip is not None:
+                self.logger.warning(f"  Found gap, unable to finish clip: {self.clip.outfile}")
+                self.clip = None
+            self.process_video(task)
             previous_end = task.video.end  # This should be populated at the end of the video capture
             task.release()
             self.counter += 1
-            if save:
-                Clip.objects.bulk_create(stubs_to_create)
 
     def process_video(self, task):
         """Loop through a single video and look for clips."""
@@ -98,13 +96,10 @@ class Detector:
         tail_frames = task.video.fps * self.params.buffer
         minlength = self.params.buffer + self.params.minlength 
         stills = 0
-        stubs = []
-        clip_stub = None
-        if self.unfinished_stub is not None:
+        fragment = None
+        if self.clip is not None:
             self.logger.info(f"    Found unfinished clip, seeking matching frame...")
-            frame0, clip_stub = self.seek_matching_image(task.video, self.unfinished_stub.end_frame)
-            clip_stub.merge_to = self.unfinished_stub
-            self.unfinished_stub = None
+            frame0, fragment = self.seek_matching_image(task.video, self.clip.last_fragment.end_frame)
         else:
             frame0 = task.read()
         
@@ -113,36 +108,33 @@ class Detector:
         while frame1 is not None:
             motion = self.detect_motion(frame0.image, frame1.image)
 
-            # if clip_stub is not None:
-            #     status = f"    Capturing: {timedelta(milliseconds=frame1.milliseconds - clip_stub.start)} | Stills: {stills:4d}"
-            # else:
-            #     status = "-" * 30
-            # self.logger.info(f"    Progress: {timedelta(milliseconds=frame1.milliseconds)} | {status}")
-
-            if clip_stub is None and motion == Motion.MOTION:  # Start capturing
-                clip_stub = Clip(video=task.video, detect_task=self.detect_task, start=frame1.milliseconds)
-                clip_stub.buff_start(self.params.buffer, save=False)
-            elif clip_stub is not None:
+            if fragment is None and motion == Motion.MOTION:  # Start capturing
+                self.clip = Clip(detect_task=self.detect_task)
+                fragment = ClipFragment(video=task.video, clip=self.clip, start=frame1.milliseconds)
+                fragment.buff_start(self.params.buffer, save=False)
+            elif fragment is not None:
                 if motion == Motion.MOTION:
                     stills = 0
                 elif motion == Motion.STILL:
                     stills += 1
                     if stills >= tail_frames:  # Stop Capturing
                         stills = 0
-                        clip_stub.end = frame1.milliseconds
-                        if clip_stub.duration >= minlength * 1000:
-                            stubs.append(clip_stub)
-                        clip_stub = None
+                        fragment.end = frame1.milliseconds
+                        if fragment.duration >= minlength * 1000:
+                            self.clip.save()
+                            fragment.save()
+
+                        fragment = None
+                        self.clip = None
             
             frame0 = frame1
             frame1 = task.read()
 
         # Stash an unfinished clip
-        if clip_stub is not None:
-            clip_stub.end_frame = Image.fromarray(frame0.image)
-            self.unfinished_stub = clip_stub
-            stubs.append(clip_stub)
-        return stubs
+        if fragment is not None:
+            fragment.end_frame = Image.fromarray(frame0.image)
+            self.clip.save()
+            fragment.save()
 
     def seek_matching_image(self, task, image_match):
         """Find the first frame that matches the given image and set up a clip at that point."""
@@ -172,11 +164,11 @@ class Detector:
             diff = self.compare_images(image_match, frame.image)
             if diff == 0.0:
                 frame = task.read()
-                clip_stub = Clip(video=task.video, detect_task=self.detect_task, start=frame.milliseconds)
-                clip_stub.start = clip_stub.start + offset
+                fragment = ClipFragment(video=task.video, start=frame.milliseconds, clip=self.clip, index=self.clip.fragments.count())
+                fragment.start = fragment.start + offset
                 break
         
-        return frame, clip_stub
+        return frame, fragment
         
 
 class ExclusionDetector(Detector):

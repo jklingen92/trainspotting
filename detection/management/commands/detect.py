@@ -6,11 +6,12 @@ from django.core.management.base import CommandError
 
 
 class Command(BaseLoggingCommand):
-    help = "Runs detect loop on batch of imported videos."
+    help = "Runs a detect algorithm on an ImportTask id, creating Clips out of the Videos."
 
     def add_arguments(self, parser):
         super().add_arguments(parser)
         parser.add_argument('import', type=int)
+        parser.add_argument('--view', default="", type=str)
 
     def handle(self, *args, **options):
         logger = self._configure_logger(options)
@@ -27,6 +28,7 @@ class Command(BaseLoggingCommand):
         sample_name = f"{first_processing_task.video.filename}_sample.png"
         detect_task, created = DetectTask.objects.get_or_create(
             import_task=import_task,
+            view=options["view"],
             defaults={
                 "sample": image_from_array(sample_name, first_frame.image)
             }
@@ -43,8 +45,9 @@ class Command(BaseLoggingCommand):
 
         try:
             detector.detect_loop()
-            logger.info(f"Created {detect_task.clips.count()} stubs")
+            logger.info(f"Created {detect_task.clips.count()} clips")
 
         except Exception as e:
             logger.error(e)
             raise e
+        

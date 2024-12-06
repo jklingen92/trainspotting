@@ -106,11 +106,11 @@ class BaseCameraCommand(BaseLoggingCommand):
                 sys.exit(1)
 
 
-def concat_clip(clip1_path, clip2_path):
-    """Concatenates a video clip onto another video clip."""
-    os.system(f'echo "file {clip1_path}" >> merge.txt')
-    os.system(f'echo "file {clip2_path}" >> merge.txt')
+def concat_clips(paths):
+    """Concatenates a series of clips together into the first clip location."""
+    for path in paths:
+        os.system(f'echo "file {path}" >> merge.txt')
     os.system(f"{FFMPEG_BASE} -f concat -safe 0 -i merge.txt -c copy merge.mp4")
-    os.system(f"mv merge.mp4 {clip1_path}")
-    os.system(f"rm -f merge.txt {clip2_path}")
+    os.system(f"mv merge.mp4 {path[0]}")
+    os.system(f"rm -f merge.txt {' '.join(paths[1:])}")
     
