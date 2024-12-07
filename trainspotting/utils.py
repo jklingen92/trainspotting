@@ -55,7 +55,7 @@ class BaseLoggingCommand(BaseCommand):
         Can be overridden by subclasses for custom logging setup.
         """
         # Get log file and level from options
-        log_file = options.get('log')
+        log_file = os.path.join("logs", options.get('log'))
         log_level = getattr(logging, options.get('log_level', 'INFO'))
 
         # Configure base logging
