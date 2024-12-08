@@ -290,4 +290,4 @@ class ClipFragment(TimeStampedModel):
         return self.video.start + timedelta(milliseconds=self.start)
 
     def extract(self, destination):
-        self.video.extract_by_milli(destination, start_milli=self.start,  end_milli=self.end)
+        self.video.videoprocessingtask.extract_by_milli(destination, start_milli=self.start,  end_milli=self.end)
