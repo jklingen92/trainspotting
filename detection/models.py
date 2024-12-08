@@ -262,7 +262,7 @@ class Clip(TimeStampedModel):
         return self.fragments.order_by("index").last()
 
     def __str__(self) -> str:
-        return f"{self.outfile} ({'not' if self.file is None else ''} extracted)"
+        return f"{self.outfile} ({'not' if self.file else ''} extracted)"
     
 
 
