@@ -262,7 +262,7 @@ class Clip(TimeStampedModel):
         return self.fragments.order_by("index").last()
 
     def __str__(self) -> str:
-        return f"{self.video.filename} [{timedelta(milliseconds=self.start)} - {timedelta(milliseconds=self.end) if self.end else 'End'}]{' (to be merged)' if self.merge_to else ''}"
+        return f"{self.outfile} ({'not' if self.file is None else ''} extracted)"
     
 
 
