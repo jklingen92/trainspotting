@@ -237,7 +237,7 @@ class Clip(TimeStampedModel):
     def clip_destination(self):
         return os.path.join(settings.MEDIA_ROOT, "clips", self.detect_task.camera.name, self.outfile)
 
-    def extract(self, destination):
+    def extract(self):
         """Extract fragments from videos and merge them if necessary."""
         fragments_to_merge = []
         for fragment in self.fragments.order_by("index"):
