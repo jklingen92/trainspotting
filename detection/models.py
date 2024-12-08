@@ -255,7 +255,7 @@ class Clip(TimeStampedModel):
 
     @property
     def first_fragment(self):
-        return self.fragments.get(index=0).first()
+        return self.fragments.get(index=0)
 
     @property
     def last_fragment(self):
