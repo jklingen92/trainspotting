@@ -39,8 +39,8 @@ class VideoBatch(TimeStampedModel):
 
     def __str__(self):
         videos = self.videos.order_by("start")
-        first = videos.first().start.astimezone(pytz.timezone("America/New York")).strftime('%F_%H%M%S')
-        last = videos.last().start.astimezone(pytz.timezone("America/New York")).strftime('%F_%H%M%S')
+        first = videos.first().start.strftime('%F_%H%M%S')
+        last = videos.last().start.strftime('%F_%H%M%S')
         return f"Batch ({first} - {last})"
 
 
@@ -235,7 +235,7 @@ class Clip(TimeStampedModel):
     
     @cached_property
     def start_datetime(self):
-        return self.first_fragment.start_datetime.astimezone(pytz.timezone("America/New _York"))
+        return self.first_fragment.start_datetime
 
     @property
     def outfile(self):
