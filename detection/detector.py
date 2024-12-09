@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from detection.models import Clip, ClipFragment
+from detection.models import Clip, ClipFragment, VideoHandler
 
 
 
@@ -31,17 +31,19 @@ class Motion(Enum):
 class Detector:
     """Detector takes a batch of videos processing tasks and detects motion in them, producing clip stubs."""
 
-    def __init__(self, detect_task, logger=None, **params) -> None:
+    def __init__(self, detection, handlers, logger=None, **params) -> None:
         
         if logger is None:
             self.logger = logging.getLogger('django')
         else:
             self.logger = logger
 
+        self.detection = detection
         self.params = DetectorParams(params)
-        self.detect_task = detect_task
-        self.processing_tasks = detect_task.import_task.processing_tasks.order_by("video__start")
-        self.camera = detect_task.camera
+        self.handlers = handlers.order_by("video__start")
+
+        assert handlers.values("camera").distinct().count() == 1
+        self.camera = handlers.first().camera
 
         self.clip = None
         self.counter = 0
@@ -63,8 +65,8 @@ class Detector:
     
     def detect_motion(self, frame0, frame1):
         """Compare two frames and return motion classification."""
-        detect0 = self.process_frame(frame0, self.detect_task.detect)
-        detect1 = self.process_frame(frame1, self.detect_task.detect)
+        detect0 = self.process_frame(frame0, self.detection.detect_area)
+        detect1 = self.process_frame(frame1, self.detection.detect_area)
         detect_score = self.compare_images(detect0, detect1)
         if detect_score >= self.params.upper:
             return Motion.MOTION
@@ -73,44 +75,44 @@ class Detector:
         else:
             return Motion.UNKNOWN
 
-    def detect_loop(self, save=True):
+    def detect_loop(self):
         """
         Loops through each video processing task and runs the detect code on it. Also check for
         continuous detect actions that straddle clips, if clips are sequential.
         """
-        self.logger.info(f"Processing {self.processing_tasks.count()} videos...")
+        self.logger.info(f"Processing {self.handlers.count()} videos...")
         previous_end = None
-        for task in self.processing_tasks.all():
-            gap = previous_end is None or task.video.start > previous_end
+        for handler in self.handlers.all():
+            gap = previous_end is None or handler.video.start > previous_end
             if gap and self.clip is not None:
                 self.logger.warning(f"  Found gap, unable to finish clip: {self.clip.outfile}")
                 self.clip = None
-            self.process_video(task)
-            previous_end = task.video.end  # This should be populated at the end of the video capture
-            task.release()
+            self.process_video(handler)
+            previous_end = handler.video.end  # This should be populated at the end of the video capture
+            handler.release()
             self.counter += 1
 
-    def process_video(self, task):
+    def process_video(self, handler):
         """Loop through a single video and look for clips."""
-        self.logger.info(f"  Processing video {self.counter + 1} of {self.processing_tasks.count()}: {task.video.filename}")
-        tail_frames = task.video.fps * self.params.buffer
+        self.logger.info(f"  Processing video {self.counter + 1} of {self.handlers.count()}: {handler.video.filename}")
+        tail_frames = handler.video.fps * self.params.buffer
         minlength = self.params.buffer + self.params.minlength 
         stills = 0
         fragment = None
         if self.clip is not None:
             self.logger.info(f"    Found unfinished clip, seeking matching frame...")
-            frame0, fragment = self.seek_matching_image(task.video, self.clip.last_fragment.end_frame)
+            frame0, fragment = self.seek_matching_image(handler.video, self.clip.last_fragment.end_frame)
         else:
-            frame0 = task.read()
+            frame0 = handler.read()
         
-        frame1 = task.read()
+        frame1 = handler.read()
             
         while frame1 is not None:
             motion = self.detect_motion(frame0.image, frame1.image)
 
             if fragment is None and motion == Motion.MOTION:  # Start capturing
-                self.clip = Clip(detect_task=self.detect_task)
-                fragment = ClipFragment(video=task.video, clip=self.clip, start=frame1.milliseconds)
+                self.clip = Clip(detection=self.detection)
+                fragment = ClipFragment(video=handler.video, clip=self.clip, start=frame1.milliseconds)
                 fragment.buff_start(self.params.buffer, save=False)
             elif fragment is not None:
                 if motion == Motion.MOTION:
@@ -128,7 +130,7 @@ class Detector:
                         self.clip = None
             
             frame0 = frame1
-            frame1 = task.read()
+            frame1 = handler.read()
 
         # Stash an unfinished clip
         if fragment is not None:
@@ -136,11 +138,11 @@ class Detector:
             self.clip.save()
             fragment.save()
 
-    def seek_matching_image(self, task, image_match):
+    def seek_matching_image(self, handler, image_match):
         """Find the first frame that matches the given image and set up a clip at that point."""
         
         # Get the video offset
-        os.system(f'ffprobe -show_entries stream=codec_type,start_time -v 0 -of json {task.file.path} >> offsets.json')
+        os.system(f'ffprobe -show_entries stream=codec_type,start_time -v 0 -of json {handler.file.path} >> offsets.json')
         with open("offsets.json") as f:
             offsets = load(f)
         os.system(f"rm -f offsets.json")
@@ -157,14 +159,14 @@ class Detector:
         # Seek the frame
         while True:
 
-            frame = task.read()
+            frame = handler.read()
             if frame is None:
                 raise Exception("Did not find matching frame.")
 
             diff = self.compare_images(image_match, frame.image)
             if diff == 0.0:
-                frame = task.read()
-                fragment = ClipFragment(video=task.video, start=frame.milliseconds, clip=self.clip, index=self.clip.fragments.count())
+                frame = handler.read()
+                fragment = ClipFragment(video=handler.video, start=frame.milliseconds, clip=self.clip, index=self.clip.fragments.count())
                 fragment.start = fragment.start + offset
                 break
         
@@ -181,8 +183,8 @@ class ExclusionDetector(Detector):
     def detect_motion(self, image0, image1):
         detect_classification = super().detect_motion(image0, image1)
 
-        exclude0 = self.process_frame(image0, self.detect_task.exclude)
-        exclude1 = self.process_frame(image1, self.detect_task.exclude)
+        exclude0 = self.process_frame(image0, self.detection.exclude_area)
+        exclude1 = self.process_frame(image1, self.detection.exclude_area)
         exclude_score = self.compare_images(exclude0, exclude1)
         if exclude_score > self.params.upper:
             return Motion.STILL

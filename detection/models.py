@@ -30,10 +30,10 @@ class Camera(TimeStampedModel):
     address = models.CharField(max_length=200)
 
 
-class ImportTask(TimeStampedModel):
-    """ImportTask logs info on a single batch import."""
+class VideoBatch(TimeStampedModel):
+    """Videobatch logs info on a single batch import."""
 
-    camera = models.ForeignKey(Camera, on_delete=models.CASCADE, related_name="import_tasks")
+    camera = models.ForeignKey(Camera, on_delete=models.CASCADE, related_name="batches")
 
 
 class Video(TimeStampedModel):
@@ -42,7 +42,7 @@ class Video(TimeStampedModel):
     filename = models.CharField(max_length=240, unique=True)
     start = models.DateTimeField()
     fps = models.PositiveSmallIntegerField()
-    import_task = models.ForeignKey(ImportTask, on_delete=models.CASCADE, related_name="videos")
+    batch = models.ForeignKey(VideoBatch, on_delete=models.CASCADE, related_name="videos")
 
     # Populated after stepping through the whole video once
     frame_count = models.PositiveIntegerField(null=True)
@@ -50,7 +50,7 @@ class Video(TimeStampedModel):
 
     @property
     def camera(self):
-        return self.import_task.camera
+        return self.batch.camera
 
     @property
     def end(self):
@@ -64,20 +64,20 @@ class Video(TimeStampedModel):
         return self.filename
 
 
-class VideoProcessingTask(TimeStampedModel):
+class VideoHandler(TimeStampedModel):
     """
-    VideoProcessingTask is a handler for an imported video file. 
+    VideoHandler is a handler for an imported video file. 
     It is designed to be deleted along with the full video file.
     """
 
     file = models.FileField(unique=True)
-    import_task = models.ForeignKey(ImportTask, on_delete=models.CASCADE, related_name="processing_tasks")
-    video = models.OneToOneField(Video, null=True, on_delete=models.SET_NULL)
+    batch = models.ForeignKey(VideoBatch, on_delete=models.CASCADE, related_name="handlers")
+    video = models.OneToOneField(Video, null=True, on_delete=models.SET_NULL, related_name="handler")
     processed = models.BooleanField(default=False)
 
     @property
     def camera(self):
-        return self.import_task.camera
+        return self.batch.camera
 
     def init(self, start=None):
         """Creates a Video instance and populates it with simple values."""
@@ -86,7 +86,7 @@ class VideoProcessingTask(TimeStampedModel):
             start = timezone.make_aware(datetime.strptime(filename, "VID_%Y%m%d_%H%M%S"))
         
         self.video = Video.objects.create(
-            import_task=self.import_task,
+            batch=self.batch,
             filename=filename,
             start=start,
             fps = self.cap.get(cv2.CAP_PROP_FPS),
@@ -155,35 +155,31 @@ class BoundingBox(TimeStampedModel):
         return (self.left, self.top), (self.right, self.bottom)
 
 
-class DetectTask(TimeStampedModel):
-    """DetectTask logs info on a single batch detect."""
+class Detection(TimeStampedModel):
+    """Detection logs info on a single batch detect."""
 
-    import_task = models.ForeignKey(ImportTask, on_delete=models.PROTECT)
+    camera = models.ForeignKey(Camera, on_delete=models.CASCADE, related_name="detections")
     sample = models.ImageField(upload_to="samples")
     view = models.CharField(max_length=120)
-    _detect = models.ForeignKey(BoundingBox, null=True, on_delete=models.SET_NULL, related_name="detect_tasks")
-    exclude = models.ForeignKey(BoundingBox, null=True, on_delete=models.SET_NULL, related_name="exclude_tasks")
+    _detect_area = models.ForeignKey(BoundingBox, null=True, on_delete=models.SET_NULL, related_name="detections")
+    exclude_area = models.ForeignKey(BoundingBox, null=True, on_delete=models.SET_NULL, related_name="exclusions")
+        
+    @property
+    def clip_destination(self):
+        return os.path.join(settings.MEDIA_ROOT, "clips", self.camera.name, self.view)
 
     @property
-    def camera(self):
-        return self.import_task.camera
-    
-    @property
-    def detect(self):
-        return self._detect or BoundingBox.objects.create(
+    def detect_area(self):
+        return self._detect_area or BoundingBox.objects.create(
             left=0, 
             top=0, 
             right=self.sample.width, 
             bottom=self.sample.height
         )
     
-    @property
-    def clip_destination(self):
-        return os.path.join(settings.MEDIA_ROOT, "clips", self.camera.name)
-    
-    @detect.setter
-    def detect(self, value):
-        self._detect = value
+    @detect_area.setter
+    def detect_area(self, value):
+        self._detect_area = value
 
     def get_bounding_box(self, title, save=True):
         """Get a bounding box on the sample image"""
@@ -199,30 +195,30 @@ class DetectTask(TimeStampedModel):
                 bounding_box.save()
             return bounding_box
 
-    def set_detect_box(self, save=True):
+    def set_detect_area(self, save=True):
         """Set a bounding box to detect motion in."""
-        detect = self.get_bounding_box(save=save)
-        if detect:
-            self.detect = detect
+        detect_area = self.get_bounding_box(save=save)
+        if detect_area:
+            self.detect_area = detect_area
         else:
-            self.detect = BoundingBox.objects.get_or_create(
+            self.detect_area = BoundingBox.objects.get_or_create(
                 left=0, 
                 top=0, 
                 right=self.sample.size[0], 
                 bottom=self.sample.size[1]
             )
-        self.save(update_fields=['detect'])
+        self.save(update_fields=['_detect_area'])
 
-    def set_exclude_box(self, save=True):
+    def set_exclude_area(self, save=True):
         """Set a bounding box to exclude motion in."""
-        self.exclude = self.get_bounding_box(save=save)
-        self.save(update_fields=['exclude'])
-
+        self.exclude_area = self.get_bounding_box(save=save)
+        self.save(update_fields=['exclude_area'])
 
 
 class Clip(TimeStampedModel):
+    """A single clip of motion. This may span more than one video."""
     
-    detect_task = models.ForeignKey(DetectTask, on_delete=models.CASCADE, related_name="clips")
+    detection = models.ForeignKey(Detection, on_delete=models.CASCADE, related_name="clips")
     file = models.FileField(null=True, upload_to="clips", unique=True)
 
     @cached_property
@@ -239,11 +235,11 @@ class Clip(TimeStampedModel):
 
     def extract(self):
         """Extract fragments from videos and merge them if necessary."""
-        if not os.path.exists(self.detect_task.clip_destination):
-            os.makedirs(self.detect_task.clip_destination)
+        if not os.path.exists(self.detection.clip_destination):
+            os.makedirs(self.detection.clip_destination)
         fragments_to_merge = []
         for fragment in self.fragments.order_by("index"):
-            dest = os.path.join(self.detect_task.clip_destination, self.outfile)
+            dest = os.path.join(self.detection.clip_destination, self.outfile)
             if fragment.index > 0:
                 dest = dest + f"_{fragment.index}"
             fragments_to_merge += dest
@@ -266,9 +262,8 @@ class Clip(TimeStampedModel):
         return f"{self.outfile} ({'not' if not self.file else ''} extracted)"
     
 
-
 class ClipFragment(TimeStampedModel):
-    """A single fragment of a clip from a video"""
+    """A single fragment of a clip from a video. More than one fragment can exist in a single video."""
 
     video = models.ForeignKey(Video, on_delete=models.CASCADE, related_name="clips")
     clip = models.ForeignKey(Clip, on_delete=models.CASCADE, related_name="fragments")
@@ -291,4 +286,4 @@ class ClipFragment(TimeStampedModel):
         return self.video.start + timedelta(milliseconds=self.start)
 
     def extract(self, destination):
-        self.video.videoprocessingtask.extract_by_milli(destination, start_milli=self.start,  end_milli=self.end)
+        self.video.handler.extract_by_milli(destination, start_milli=self.start,  end_milli=self.end)
