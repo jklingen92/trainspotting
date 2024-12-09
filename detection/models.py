@@ -9,7 +9,6 @@ from numpy import ndarray
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
 from PIL import Image
-import pytz
 
 from detection.utils import ImageInterface
 from trainspotting.utils import concat_clips
