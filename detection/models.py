@@ -177,6 +177,10 @@ class DetectTask(TimeStampedModel):
             bottom=self.sample.height
         )
     
+    @property
+    def clip_destination(self):
+        return os.path.join(settings.MEDIA_ROOT, "clips", self.camera.name)
+    
     @detect.setter
     def detect(self, value):
         self._detect = value
@@ -233,17 +237,13 @@ class Clip(TimeStampedModel):
     def outfile(self):
         return f"{self.start_datetime.strftime('%F_%H%M%S')}.mp4"
 
-    @property
-    def clip_destination(self):
-        return os.path.join(settings.MEDIA_ROOT, "clips", self.detect_task.camera.name)
-
     def extract(self):
         """Extract fragments from videos and merge them if necessary."""
-        if not os.path.exists(self.clip_destination):
-            os.makedirs(self.clip_destination)
+        if not os.path.exists(self.detect_task.clip_destination):
+            os.makedirs(self.detect_task.clip_destination)
         fragments_to_merge = []
         for fragment in self.fragments.order_by("index"):
-            dest = os.path.join(self.clip_destination, self.outfile)
+            dest = os.path.join(self.detect_task.clip_destination, self.outfile)
             if fragment.index > 0:
                 dest = dest + f"_{fragment.index}"
             fragments_to_merge += dest
