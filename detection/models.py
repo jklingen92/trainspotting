@@ -39,7 +39,7 @@ class VideoBatch(TimeStampedModel):
 
     def __str__(self):
         videos = self.videos.order_by("start")
-        return f"Batch ({videos.first().strftime('%F_%H%M%S')} - {videos.last().strftime('%F_%H%M%S')})"
+        return f"Batch ({videos.first().start.strftime('%F_%H%M%S')} - {videos.last().start.strftime('%F_%H%M%S')})"
 
 
 class Video(TimeStampedModel):
