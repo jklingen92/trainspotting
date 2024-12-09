@@ -9,6 +9,7 @@ from numpy import ndarray
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
 from PIL import Image
+import pytz
 
 from detection.utils import ImageInterface
 from trainspotting.utils import concat_clips
@@ -219,7 +220,7 @@ class Clip(TimeStampedModel):
     """A single clip of motion. This may span more than one video."""
     
     detection = models.ForeignKey(Detection, on_delete=models.CASCADE, related_name="clips")
-    file = models.FileField(null=True, upload_to="clips", unique=True)
+    file = models.FileField(null=True, upload_to="clips")
 
     @cached_property
     def duration(self):
@@ -227,7 +228,7 @@ class Clip(TimeStampedModel):
     
     @cached_property
     def start_datetime(self):
-        return self.first_fragment.start_datetime
+        return self.first_fragment.start_datetime.astimezone(pytz.timezone("America/New _York"))
 
     @property
     def outfile(self):
@@ -259,7 +260,7 @@ class Clip(TimeStampedModel):
         return self.fragments.order_by("index").last()
 
     def __str__(self) -> str:
-        return f"{self.outfile} ({'not' if not self.file else ''} extracted)"
+        return f"{self.outfile} ({'not ' if not self.file else ''}extracted)"
     
 
 class ClipFragment(TimeStampedModel):
