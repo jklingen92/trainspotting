@@ -37,6 +37,11 @@ class VideoBatch(TimeStampedModel):
     camera = models.ForeignKey(Camera, on_delete=models.CASCADE, related_name="batches")
 
 
+    def __str__(self):
+        videos = self.videos.order_by("start")
+        return f"Batch ({videos.first().strftime('%F_%H%M%S')} - {videos.last().strftime('%F_%H%M%S')})"
+
+
 class Video(TimeStampedModel):
     """Video stores metadata on a video that will persist after the video file is deleted."""
 
