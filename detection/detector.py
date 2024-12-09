@@ -42,7 +42,7 @@ class Detector:
         self.params = DetectorParams(params)
         self.handlers = handlers.order_by("video__start")
 
-        assert handlers.values("camera").distinct().count() == 1
+        assert handlers.values("batch__camera").distinct().count() == 1
         self.camera = handlers.first().camera
 
         self.clip = None

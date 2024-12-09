@@ -49,7 +49,7 @@ def import_videos(video_paths: list [str], camera: str, logger=None):
 def detect_clips(video_handlers, view: str ="", logger=None):
 
         # Assert that there is only one camera among the video_handlers
-        assert video_handlers.values("camera").distinct().count() == 1
+        assert video_handlers.values("batch__camera").distinct().count() == 1
         camera = video_handlers.first().camera
 
         first_handler = video_handlers.first()
