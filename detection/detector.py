@@ -20,6 +20,7 @@ class DetectorParams:
     minlength: int = 5
     upper: float = 5
     lower: float = 1
+    step: int = 6
 
 
 class Motion(Enum):
@@ -105,6 +106,7 @@ class Detector:
         else:
             frame0 = handler.read()
         
+        handler.seek_frame(frame0.frame_number + self.params.step - 1)
         frame1 = handler.read()
             
         while frame1 is not None:
@@ -132,9 +134,14 @@ class Detector:
             frame0 = frame1
             frame1 = handler.read()
 
+        # Cycle through the rest of the frames
+        while frame0 is not None:
+            end_frame = frame0
+            frame0 = handler.read()
+
         # Stash an unfinished clip
         if fragment is not None:
-            fragment.end_frame = Image.fromarray(frame0.image)
+            fragment.end_frame = Image.fromarray(end_frame.image)
             self.clip.save()
             fragment.save()
 
