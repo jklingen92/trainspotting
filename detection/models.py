@@ -6,7 +6,7 @@ import cv2
 from django.db import models
 from django.conf import settings
 from numpy import ndarray
-from django.utils import timezone
+from django.utils.text import slugify
 from django_extensions.db.models import TimeStampedModel
 from PIL import Image
 
@@ -28,6 +28,10 @@ class Camera(TimeStampedModel):
 
     name = models.CharField(max_length=120, unique=True)
     address = models.CharField(max_length=200)
+
+    @property
+    def video_destination(self):
+        return os.path.join(settings.MEDIA_ROOT, "videos", slugify(self.name))
 
 
 class VideoBatch(TimeStampedModel):
@@ -173,7 +177,7 @@ class Detection(TimeStampedModel):
         
     @property
     def clip_destination(self):
-        return os.path.join(settings.MEDIA_ROOT, "clips", self.camera.name, self.view)
+        return os.path.join(settings.MEDIA_ROOT, "clips", slugify(self.camera.name), slugify(self.view))
 
     @property
     def detect_area(self):

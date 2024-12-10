@@ -4,23 +4,22 @@ import os
 
 from django.conf import settings
 from detection.detector import Detector, ExclusionDetector
-from detection.models import Detection, VideoBatch, VideoHandler
+from detection.models import Camera, Detection, VideoBatch, VideoHandler
 from detection.utils import image_from_array
 
 
-def import_videos(video_paths: list [str], camera: str, logger=None):
+def import_videos(video_paths: list [str], camera: Camera, logger=None):
 
     video_batch = VideoBatch.objects.create(camera=camera)
     num_videos = len(video_paths)
     
-    staging_location = os.path.join(settings.MEDIA_ROOT, 'raw', camera.name)
-    if not os.path.exists(staging_location):
+    if not os.path.exists(camera.video_destination):
         if logger:
-            logger.info("Creating video repository: {staging_location}")
-        os.makedirs(staging_location)
+            logger.info("Creating video repository: {camera.video_destination}")
+        os.makedirs(camera.video_destination)
     
     if logger:
-        logger.info(f"Importing {num_videos} videos to {staging_location}:")
+        logger.info(f"Importing {num_videos} videos to {camera.video_destination}:")
         
     try:
         for i, video_path in enumerate(video_paths):
@@ -29,7 +28,7 @@ def import_videos(video_paths: list [str], camera: str, logger=None):
             if logger:
                 logger.info(f"  Importing {filename} ({i + 1} of {num_videos})")
 
-            os.system(f"rsync {video_path} {staging_location}/")
+            os.system(f"rsync {video_path} {camera.video_destination}/")
             task = VideoHandler.objects.create(batch=video_batch, file=os.path.join('raw', camera.name, filename))
             task.init()
     
