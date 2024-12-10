@@ -45,28 +45,29 @@ def import_videos(video_paths: list [str], camera: Camera, logger=None):
     return video_batch
 
 
-def detect_clips(video_handlers, view: str ="", logger=None):
+def detect_clips(video_handlers, detection: Detection=None, view: str ="", logger=None):
 
-        # Assert that there is only one camera among the video_handlers
-        assert video_handlers.values("batch__camera").distinct().count() == 1
-        camera = video_handlers.first().camera
+        if detection is None:
+            # Assert that there is only one camera among the video_handlers
+            assert video_handlers.values("batch__camera").distinct().count() == 1
+            camera = video_handlers.first().camera
 
-        first_handler = video_handlers.first()
-        first_frame = first_handler.read()
-        first_handler.release()
+            first_handler = video_handlers.first()
+            first_frame = first_handler.read()
+            first_handler.release()
 
-        sample_name = f"{first_handler.video.filename}_sample.png"
-        detection, _ = Detection.objects.get_or_create(
-            camera=camera,
-            view=view,
-            defaults={
-                "sample": image_from_array(sample_name, first_frame.image)
-            }
-        )
-        
-        detection.detect_area = detection.get_bounding_box("Select a detection area or leave blank for the full area")
-        detection.exclude_area = detection.get_bounding_box("Select an exclusion area or leave blank for no exclusion")
-        detection.save()
+            sample_name = f"{first_handler.video.filename}_sample.png"
+            detection, _ = Detection.objects.get_or_create(
+                camera=camera,
+                view=view,
+                defaults={
+                    "sample": image_from_array(sample_name, first_frame.image)
+                }
+            )
+
+            detection.detect_area = detection.get_bounding_box("Select a detection area or leave blank for the full area")
+            detection.exclude_area = detection.get_bounding_box("Select an exclusion area or leave blank for no exclusion")
+            detection.save()
 
         if detection.exclude_area is None:
             detector = Detector(detection, video_handlers, logger=logger)

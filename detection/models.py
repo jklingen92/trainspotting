@@ -6,6 +6,7 @@ import cv2
 from django.db import models
 from django.conf import settings
 from numpy import ndarray
+from django.utils import timezone
 from django.utils.text import slugify
 from django_extensions.db.models import TimeStampedModel
 from PIL import Image
