@@ -254,7 +254,7 @@ class Clip(TimeStampedModel):
             dest = os.path.join(self.detection.clip_destination, self.outfile)
             if fragment.index > 0:
                 dest = dest + f"_{fragment.index}"
-            fragments_to_merge += dest
+            fragments_to_merge.append(dest)
             fragment.extract(dest)
         if len(fragments_to_merge) > 1:
             concat_clips(fragments_to_merge)
