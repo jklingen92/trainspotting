@@ -247,7 +247,7 @@ class Clip(TimeStampedModel):
     
     def display_frames(self):
         """Displays 5 frames from the clip, the first, last, 5s, 5s from the end, and center."""
-        cap = cv2.VideoCapture(self.file)
+        cap = cv2.VideoCapture(self.file.path)
         _, frame1 = cap.read()
         cap.set(cv2.CAP_PROP_POS_MSEC, 5000)
         _, frame2 = cap.read()
