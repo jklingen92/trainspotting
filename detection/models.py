@@ -246,18 +246,17 @@ class Clip(TimeStampedModel):
         return f"{self.start_datetime.strftime('%F_%H%M%S')}.mp4"
     
     def display_frames(self):
-        """Displays 5 frames from the clip, the first, last, 5s, 5s from the end, and center."""
+        """Displays 5 frames from the clip, the first, last, 6s, 6s from the end, and center."""
         cap = cv2.VideoCapture(self.file.path)
         _, frame1 = cap.read()
-        cap.set(cv2.CAP_PROP_POS_MSEC, 5000)
+        cap.set(cv2.CAP_PROP_POS_MSEC, 6000)
         _, frame2 = cap.read()
         cap.set(cv2.CAP_PROP_POS_MSEC, self.duration / 2)
         _, frame3 = cap.read()
-        cap.set(cv2.CAP_PROP_POS_MSEC, 5000)
+        cap.set(cv2.CAP_PROP_POS_MSEC, self.duration - 6000)
         _, frame4 = cap.read()
         frame5 = self.last_fragment.end_frame
         display_tiles([frame1, frame2, frame3, frame4, frame5], titles=["First", "5s", "Middle", "-5s", "Last"])
-
 
     def extract(self):
         """Extract fragments from videos and merge them if necessary."""
