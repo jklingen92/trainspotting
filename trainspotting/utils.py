@@ -133,12 +133,10 @@ def display_tiles(tiles, titles=None):
     if not tiles:
         raise ValueError("At least one image must be provided")
     
-    # If titles are not provided, create default titles
+    # If normalize titles
     if titles is None:
         titles = [f'Tile {i+1}' for i in range(len(tiles))]
-    
-    # Ensure titles match number of images
-    if len(titles) < len(tiles):
+    elif len(titles) < len(tiles):
         titles.extend([f'Image {i+1}' for i in range(len(titles), len(tiles))])
     
     # Create the figure and subplots
@@ -150,16 +148,7 @@ def display_tiles(tiles, titles=None):
     
     # Display each image
     for i, (img, title) in enumerate(zip(tiles, titles)):
-        # Check if image is grayscale or color
-        if len(img.shape) == 2:
-            # Grayscale image
-            axs[i].imshow(img, cmap='gray')
-        else:
-            # Color image (assume BGR to RGB conversion if needed)
-            if img.shape[2] == 3:
-                # OpenCV uses BGR, Matplotlib uses RGB
-                img = img[...,::-1]
-            axs[i].imshow(img)
+        axs[i].imshow(img)
         
         # Set title
         axs[i].set_title(title)

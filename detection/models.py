@@ -171,7 +171,7 @@ class Detection(TimeStampedModel):
     """Detection logs info on a single batch detect."""
 
     camera = models.ForeignKey(Camera, on_delete=models.CASCADE, related_name="detections")
-    sample = models.ImageField(upload_to="samples")
+    sample = models.ImageField(upload_to="samples/")
     view = models.CharField(max_length=120)
     _detect_area = models.ForeignKey(BoundingBox, null=True, on_delete=models.SET_NULL, related_name="detections")
     exclude_area = models.ForeignKey(BoundingBox, null=True, on_delete=models.SET_NULL, related_name="exclusions")
@@ -231,7 +231,7 @@ class Clip(TimeStampedModel):
     """A single clip of motion. This may span more than one video."""
     
     detection = models.ForeignKey(Detection, on_delete=models.CASCADE, related_name="clips")
-    file = models.FileField(null=True, upload_to="clips")
+    file = models.FileField(null=True, upload_to="clips/")
 
     @cached_property
     def duration(self):
