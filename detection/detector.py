@@ -76,7 +76,7 @@ class Detector:
         else:
             return Motion.UNKNOWN
 
-    def detect_loop(self):
+    def detect_loop(self, start=0):
         """
         Loops through each video processing task and runs the detect code on it. Also check for
         continuous detect actions that straddle clips, if clips are sequential.
@@ -84,6 +84,8 @@ class Detector:
         self.logger.info(f"Processing {self.handlers.count()} videos...")
         previous_end = None
         for handler in self.handlers.all():
+            if start > self.counter:
+                continue
             gap = previous_end is None or handler.video.start > previous_end
             if gap and self.clip is not None:
                 self.logger.warning(f"  Found gap, unable to finish clip: {self.clip.outfile}")

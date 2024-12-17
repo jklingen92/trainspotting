@@ -9,7 +9,8 @@ class Command(BaseLoggingCommand):
 
     def add_arguments(self, parser):
         super().add_arguments(parser)
-        parser.add_argument('import', type=int)
+        parser.add_argument('-i', '--import', type=int)
+        parser.add_argument('-s', '--start', default=0, type=int)
         parser.add_argument('--view', default="", type=str)
         parser.add_argument('-d', '--detection', type=int, default=None)
 
@@ -30,10 +31,10 @@ class Command(BaseLoggingCommand):
             except Detection.DoesNotExist as e:
                 raise CommandError(e)
             
-            detect_clips(video_batch.handlers.all(), detection=detection, logger=logger)
+            detect_clips(video_batch.handlers.all(), detection=detection, start=options["start"], logger=logger)
 
         else:
 
-            detect_clips(video_batch.handlers.all(), view=options["view"], logger=logger)
+            detect_clips(video_batch.handlers.all(), view=options["view"], start=options["start"], logger=logger)
 
         

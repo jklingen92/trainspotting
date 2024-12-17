@@ -45,7 +45,7 @@ def import_videos(video_paths: list [str], camera: Camera, logger=None):
     return video_batch
 
 
-def detect_clips(video_handlers, detection: Detection=None, view: str ="", logger=None):
+def detect_clips(video_handlers, detection: Detection=None, view: str ="", start: int=0, logger=None):
 
         if detection is None:
             # Assert that there is only one camera among the video_handlers
@@ -75,7 +75,7 @@ def detect_clips(video_handlers, detection: Detection=None, view: str ="", logge
             detector = ExclusionDetector(detection, logger=logger)
 
         try:
-            detector.detect_loop()
+            detector.detect_loop(start=start)
             if logger:
                 logger.info(f"Created {detection.clips.count()} clips")
 

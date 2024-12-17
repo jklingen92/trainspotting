@@ -3,6 +3,7 @@ import os
 import sys
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from matplotlib import pyplot as plt
 
 from trainspotting.settings import FFMPEG_BASE
 
@@ -114,3 +115,58 @@ def concat_clips(paths):
     os.system(f"mv merge.mp4 {path[0]}")
     os.system(f"rm -f merge.txt {' '.join(paths[1:])}")
     
+
+def display_tiles(tiles, titles=None):
+    """
+    Display up to 5 images side by side using Matplotlib.
+    
+    Parameters:
+    - images: List of images (up to 5) to display
+    - titles: Optional list of titles for each image (must match length of images)
+    - figsize: Size of the figure (width, height) in inches
+    
+    Returns:
+    None (displays images)
+    """
+    
+    # Validate input
+    if not tiles:
+        raise ValueError("At least one image must be provided")
+    
+    # If titles are not provided, create default titles
+    if titles is None:
+        titles = [f'Tile {i+1}' for i in range(len(tiles))]
+    
+    # Ensure titles match number of images
+    if len(titles) < len(tiles):
+        titles.extend([f'Image {i+1}' for i in range(len(titles), len(tiles))])
+    
+    # Create the figure and subplots
+    fig, axs = plt.subplots(1, len(tiles))
+    
+    # Ensure axs is always an array (for single image case)
+    if len(tiles) == 1:
+        axs = [axs]
+    
+    # Display each image
+    for i, (img, title) in enumerate(zip(tiles, titles)):
+        # Check if image is grayscale or color
+        if len(img.shape) == 2:
+            # Grayscale image
+            axs[i].imshow(img, cmap='gray')
+        else:
+            # Color image (assume BGR to RGB conversion if needed)
+            if img.shape[2] == 3:
+                # OpenCV uses BGR, Matplotlib uses RGB
+                img = img[...,::-1]
+            axs[i].imshow(img)
+        
+        # Set title
+        axs[i].set_title(title)
+        
+        # Remove axis ticks
+        axs[i].axis('off')
+    
+    # Adjust layout and display
+    plt.tight_layout()
+    plt.show()

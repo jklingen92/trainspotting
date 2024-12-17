@@ -12,7 +12,7 @@ from django_extensions.db.models import TimeStampedModel
 from PIL import Image
 
 from detection.utils import ImageInterface
-from trainspotting.utils import concat_clips
+from trainspotting.utils import concat_clips, display_tiles
 
 
 @dataclass
@@ -244,6 +244,20 @@ class Clip(TimeStampedModel):
     @property
     def outfile(self):
         return f"{self.start_datetime.strftime('%F_%H%M%S')}.mp4"
+    
+    def display_frames(self):
+        """Displays 5 frames from the clip, the first, last, 5s, 5s from the end, and center."""
+        cap = cv2.VideoCapture(self.file)
+        _, frame1 = cap.read()
+        cap.set(cv2.CAP_PROP_POS_MSEC, 5000)
+        _, frame2 = cap.read()
+        cap.set(cv2.CAP_PROP_POS_MSEC, self.duration / 2)
+        _, frame3 = cap.read()
+        cap.set(cv2.CAP_PROP_POS_MSEC, 5000)
+        _, frame4 = cap.read()
+        frame5 = self.last_fragment.end_frame
+        display_tiles([frame1, frame2, frame3, frame4, frame5], ["First", "5s", "Middle", "-5s", "Last"])
+
 
     def extract(self):
         """Extract fragments from videos and merge them if necessary."""
