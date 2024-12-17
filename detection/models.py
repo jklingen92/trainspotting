@@ -303,7 +303,11 @@ class ClipFragment(TimeStampedModel):
             self.save()
 
     def set_end_frame(self, array, save=True):
-        filename = f"{self.clip.split('.')[0]}_F{self.index}.png"
+        try:
+            clip_start = self.clip.start_datetime
+        except ClipFragment.DoesNotExist:
+            clip_start = self.start_datetime
+        filename = f"{clip_start.strftime('%F_%H%M%S')}_F{self.index}.png"
         self.end_frame = image_from_array(filename, array)
         if save:
             self.save(update_fields=["end_frame"])

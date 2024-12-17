@@ -126,9 +126,9 @@ class Detector:
                     if stills >= tail_frames:  # Stop Capturing
                         stills = 0
                         fragment.end = frame1.milliseconds
-                        fragment.set_end_frame(frame1.image)
                         if fragment.duration >= minlength * 1000:
                             self.clip.save()
+                            fragment.set_end_frame(frame1.image, save=False)
                             fragment.save()
 
                         fragment = None
