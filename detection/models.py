@@ -256,7 +256,7 @@ class Clip(TimeStampedModel):
         cap.set(cv2.CAP_PROP_POS_MSEC, 5000)
         _, frame4 = cap.read()
         frame5 = self.last_fragment.end_frame
-        display_tiles([frame1, frame2, frame3, frame4, frame5], ["First", "5s", "Middle", "-5s", "Last"])
+        display_tiles([frame1, frame2, frame3, frame4, frame5], titles=["First", "5s", "Middle", "-5s", "Last"])
 
 
     def extract(self):
