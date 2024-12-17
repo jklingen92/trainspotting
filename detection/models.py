@@ -11,7 +11,7 @@ from django.utils.text import slugify
 from django_extensions.db.models import TimeStampedModel
 from PIL import Image
 
-from detection.utils import ImageInterface
+from detection.utils import ImageInterface, image_from_array
 from trainspotting.utils import concat_clips, display_tiles
 
 
@@ -301,6 +301,12 @@ class ClipFragment(TimeStampedModel):
         self.start = max(self.start - (buffer * 1000), 0)
         if save:
             self.save()
+
+    def set_end_frame(self, array, save=True):
+        filename = f"{self.clip.split('.')[0]}_F{self.index}.png"
+        self.end_frame = image_from_array(filename, array)
+        if save:
+            self.save(update_fields=["end_frame"])
 
     @property
     def duration(self):

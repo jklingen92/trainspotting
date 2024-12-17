@@ -1,7 +1,6 @@
 import logging
 import os
 from dataclasses import dataclass
-from datetime import timedelta
 from enum import Enum
 from json import load
 
@@ -9,7 +8,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from detection.models import Clip, ClipFragment, VideoHandler
+from detection.models import Clip, ClipFragment
+from detection.utils import image_from_array
 
 
 
@@ -126,7 +126,7 @@ class Detector:
                     if stills >= tail_frames:  # Stop Capturing
                         stills = 0
                         fragment.end = frame1.milliseconds
-                        fragment.end_frame = Image.fromarray(frame1.image)
+                        fragment.set_end_frame(frame1.image)
                         if fragment.duration >= minlength * 1000:
                             self.clip.save()
                             fragment.save()
@@ -144,7 +144,7 @@ class Detector:
 
         # Stash an unfinished clip
         if fragment is not None:
-            fragment.end_frame = Image.fromarray(end_frame.image)
+            fragment.set_end_frame(end_frame.image, save=False)
             self.clip.save()
             fragment.save()
 
