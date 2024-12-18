@@ -82,8 +82,8 @@ def detect_clips(video_handlers, detection: Detection=None, view: str ="", start
         except Exception as e:
             if logger:
                 logger.error(e)
-        else:
-            raise e
+            else:
+                raise e
         
         return detection
 
