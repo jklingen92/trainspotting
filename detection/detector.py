@@ -85,6 +85,7 @@ class Detector:
         previous_end = None
         for handler in self.handlers.all():
             if start > self.counter:
+                self.counter += 1
                 continue
             gap = previous_end is None or handler.video.start > previous_end
             if gap and self.clip is not None:
