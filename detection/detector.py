@@ -144,8 +144,8 @@ class Detector:
 
         # Stash an unfinished clip
         if fragment is not None:
-            fragment.set_end_frame(end_frame.image, save=False)
             self.clip.save()
+            fragment.set_end_frame(end_frame.image, save=False)
             fragment.save()
 
     def seek_matching_image(self, handler, image_match):
