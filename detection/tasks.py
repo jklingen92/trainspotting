@@ -1,19 +1,16 @@
-
-
 import os
 
-from django.conf import settings
 from detection.detector import Detector, ExclusionDetector
 from detection.models import Camera, Detection, VideoBatch, VideoHandler
 from detection.utils import image_from_array
 
 
-def import_videos(video_paths: list [str], camera: Camera, logger=None):
+def import_videos(video_paths: list [str], camera: Camera, logger=None, in_place=False):
 
     video_batch = VideoBatch.objects.create(camera=camera)
     num_videos = len(video_paths)
     
-    if not os.path.exists(camera.video_destination):
+    if not in_place and not os.path.exists(camera.video_destination):
         if logger:
             logger.info("Creating video repository: {camera.video_destination}")
         os.makedirs(camera.video_destination)
@@ -28,8 +25,13 @@ def import_videos(video_paths: list [str], camera: Camera, logger=None):
             if logger:
                 logger.info(f"  Importing {filename} ({i + 1} of {num_videos})")
 
-            os.system(f"rsync {video_path} {camera.video_destination}/")
-            task = VideoHandler.objects.create(batch=video_batch, file=os.path.join('raw', camera.name, filename))
+            if in_place:
+                path = video_path
+            else:
+                path = os.path.join('raw', camera.name, filename)
+                os.system(f"rsync {video_path} {camera.video_destination}/")
+
+            task = VideoHandler.objects.create(batch=video_batch, file=path)
             task.init()
     
     except Exception as e:
