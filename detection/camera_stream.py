@@ -63,6 +63,8 @@ class OpenCVGstreamerStream:
                 f"video/x-raw, format=BGR ! "
                 f"appsink drop=1"
             )
+        else:
+            print("Using USB camera")
     
     def start_capture(self):
         """Start capturing frames using OpenCV with GStreamer pipeline"""
