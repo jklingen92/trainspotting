@@ -11,7 +11,7 @@ from gi.repository import Gst, GLib
 class OpenCVGstreamerStream:
     """Class that integrates OpenCV with GStreamer for camera streaming on Jetson Orin Nano"""
     
-    def __init__(self, camera_id=0, width=640, height=480, fps=30, 
+    def __init__(self, camera_id=0, width=1920  , height=1080, fps=30, 
                  is_csi=False, sensor_id=0, flip_method=0):
         """
         Initialize the OpenCV-GStreamer camera stream

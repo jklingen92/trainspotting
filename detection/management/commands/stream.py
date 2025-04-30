@@ -38,10 +38,10 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--camera-id', type=int, default=0,
                             help='Camera device ID for USB camera (default: 0)')
-        parser.add_argument('--width', type=int, default=640,
-                            help='Stream width in pixels (default: 640)')
-        parser.add_argument('--height', type=int, default=480,
-                            help='Stream height in pixels (default: 480)')
+        parser.add_argument('--width', type=int, default=1920,
+                            help='Stream width in pixels (default: 1920)')
+        parser.add_argument('--height', type=int, default=1080,
+                            help='Stream height in pixels (default: 1080)')
         parser.add_argument('--fps', type=int, default=30,
                             help='Target frames per second (default: 30)')
         parser.add_argument('--port', type=int, default=8000,
