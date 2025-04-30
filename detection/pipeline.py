@@ -48,4 +48,4 @@ def build_pipeline(camera_id, resolution, framerate, exposure, bitrate, auto_gai
         )
 
     # Create the complete pipeline string
-    pipeline_str = " ! ".join(pipeline_elements)
+    return " ! ".join(pipeline_elements)
