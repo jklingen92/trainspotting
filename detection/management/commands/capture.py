@@ -22,7 +22,7 @@ class Command(BaseCommand):
         parser.add_argument('--framerate', type=int, default=30, help='Frames per second')
         parser.add_argument('--bitrate', type=int, default=50000, help='Bitrate in kbps')
         parser.add_argument('--max_file_size', type=int, default=0, help='Maximum file size in GB (0 for unlimited)')
-        parser.add_argument('--buffer', type=int, help='Seconds to add onto beginning and end of clip')
+        parser.add_argument('--buffer', type=int, default=3, help='Seconds to add onto beginning and end of clip')
         parser.add_argument('--min_clip_length', type=int, default=3, help='Minimum length in seconds for a saved clip')
         parser.add_argument('--test', action="store_true", help='Record continuously and log motion detection to a file.')
         
