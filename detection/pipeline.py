@@ -38,7 +38,8 @@ def build_pipeline(camera_id, resolution, framerate, exposure, bitrate, auto_gai
         "nvvidconv",
         "video/x-raw, format=BGRx",
         "videoconvert",
-        "autovideosink"
+        "video/x-raw, format=BGRx",
+        "appsink max-buffers=1 drop=true",
     ]
 
     if preview:
