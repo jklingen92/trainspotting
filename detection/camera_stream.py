@@ -51,18 +51,18 @@ class OpenCVGstreamerStream:
         return cv2.getBuildInformation().find("GStreamer") != -1
     
     def build_pipeline_string(self):
-        """Build the GStreamer pipeline string for OpenCV based on camera type"""
-        # CSI camera pipeline using nvarguscamerasrc
-        return (
-            f"nvarguscamerasrc sensor-id={self.sensor_id} ! "
-            f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
-            f"format=NV12, framerate={self.fps}/1 ! "
-            f"nvvidconv flip-method={self.flip_method} ! "
-            f"video/x-raw, format=BGRx ! "
-            f"videoconvert ! "
-            f"video/x-raw, format=BGR ! "
-            f"appsink drop=1"
-        )
+        if self.is_csi:
+            # Simplified CSI camera pipeline
+            return (
+                f"nvarguscamerasrc sensor-id={self.sensor_id} ! "
+                f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
+                f"format=NV12, framerate={self.fps}/1 ! "
+                f"nvvidconv ! "
+                f"video/x-raw, format=BGRx ! "
+                f"videoconvert ! "
+                f"video/x-raw, format=BGR ! "
+                f"appsink drop=1"
+            )
     
     def start_capture(self):
         """Start capturing frames using OpenCV with GStreamer pipeline"""
