@@ -51,10 +51,11 @@ class OpenCVGstreamerStream:
     def build_pipeline_string(self):
             # Simplified CSI camera pipeline
         return (
-            f"nvarguscamerasrc sensor-id={self.sensor_id} ! "
-            f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, framerate={self.fps}/1 ! "
-            f"nvvidconv ! "
-            f"xvimagesink"
+            f"nvarguscamerasrc sensor-id=0 ! "
+            f"video/x-raw(memory:NVMM), width=1920, height=1080, format=NV12, framerate=30/1 ! "
+            f"nvvidconv ! video/x-raw, format=BGRx ! "
+            f"videoconvert ! video/x-raw, format=BGR ! "
+            f"appsink drop=1"
         )
     
     def start_capture(self):
