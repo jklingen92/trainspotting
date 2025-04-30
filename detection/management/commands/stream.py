@@ -5,13 +5,10 @@ import socket
 from detection.camera_stream import CameraStream
 import numpy as np  # Required for blank frame
 from django.conf import settings
-from django.urls import path
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.http import StreamingHttpResponse
-from django.conf.urls import url
 from django.template.response import TemplateResponse
-from django.urls import path
 from django.views.decorators.gzip import gzip_page
 
 
