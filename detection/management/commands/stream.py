@@ -2,14 +2,17 @@
 
 import os
 import socket
-from detection.camera_stream import CameraStream
+from detection.camera_stream import OpenCVGstreamerStream
 import numpy as np  # Required for blank frame
+import sys
+import importlib.util
 from django.conf import settings
 from django.urls import path
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.http import StreamingHttpResponse
 from django.template.response import TemplateResponse
+from django.urls import path
 from django.views.decorators.gzip import gzip_page
 
 
@@ -30,11 +33,11 @@ def video_feed(request):
     )
 
 class Command(BaseCommand):
-    help = 'Starts a camera stream server for remote camera focus adjustment'
+    help = 'Starts an OpenCV+GStreamer camera stream server for remote camera focus adjustment'
     
     def add_arguments(self, parser):
         parser.add_argument('--camera-id', type=int, default=0,
-                            help='Camera device ID (default: 0)')
+                            help='Camera device ID for USB camera (default: 0)')
         parser.add_argument('--width', type=int, default=640,
                             help='Stream width in pixels (default: 640)')
         parser.add_argument('--height', type=int, default=480,
@@ -43,22 +46,30 @@ class Command(BaseCommand):
                             help='Target frames per second (default: 30)')
         parser.add_argument('--port', type=int, default=8000,
                             help='HTTP server port (default: 8000)')
+        parser.add_argument('--csi', action='store_true',
+                            help='Use CSI camera instead of USB camera')
+        parser.add_argument('--sensor-id', type=int, default=0,
+                            help='Sensor ID for CSI camera (default: 0)')
+        parser.add_argument('--flip-method', type=int, default=0,
+                            help='Camera flip method: 0=none, 1=counterclockwise, 2=180, 3=clockwise (default: 0)')
     
     def handle(self, *args, **options):
         
-    
         # Initialize the global camera stream
         global camera_stream
-        camera_stream = CameraStream(
+        camera_stream = OpenCVGstreamerStream(
             camera_id=options['camera_id'],
             width=options['width'],
             height=options['height'],
-            fps=options['fps']
+            fps=options['fps'],
+            is_csi=options['csi'],
+            sensor_id=options['sensor_id'],
+            flip_method=options['flip_method']
         )
         
-        # Start capturing frames
+        # Start the OpenCV-GStreamer pipeline
         if not camera_stream.start_capture():
-            self.stdout.write(self.style.ERROR('Failed to initialize camera'))
+            self.stdout.write(self.style.ERROR('Failed to start camera capture'))
             return
         
         # Create a temporary template for the stream view
@@ -115,12 +126,14 @@ class Command(BaseCommand):
             </html>
             """)
         
+        # Configure URLs
+        
+        
         # Store the original URLconf
         original_urlconf = settings.ROOT_URLCONF
         
         # Create a new module for the temporary URLconf
-        import sys
-        import importlib.util
+        
         spec = importlib.util.spec_from_loader('temp_urls', loader=None)
         temp_urls = importlib.util.module_from_spec(spec)
         sys.modules['temp_urls'] = temp_urls
