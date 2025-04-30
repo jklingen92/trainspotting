@@ -46,8 +46,6 @@ class Command(BaseCommand):
                             help='Target frames per second (default: 30)')
         parser.add_argument('--port', type=int, default=8000,
                             help='HTTP server port (default: 8000)')
-        parser.add_argument('--csi', action='store_true',
-                            help='Use CSI camera instead of USB camera')
         parser.add_argument('--sensor-id', type=int, default=0,
                             help='Sensor ID for CSI camera (default: 0)')
         parser.add_argument('--flip-method', type=int, default=0,
@@ -62,7 +60,6 @@ class Command(BaseCommand):
             width=options['width'],
             height=options['height'],
             fps=options['fps'],
-            is_csi=options['csi'],
             sensor_id=options['sensor_id'],
             flip_method=options['flip_method']
         )

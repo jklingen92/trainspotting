@@ -12,7 +12,7 @@ class OpenCVGstreamerStream:
     """Class that integrates OpenCV with GStreamer for camera streaming on Jetson Orin Nano"""
     
     def __init__(self, camera_id=0, width=1920  , height=1080, fps=30, 
-                 is_csi=False, sensor_id=0, flip_method=0):
+                 sensor_id=0, flip_method=0):
         """
         Initialize the OpenCV-GStreamer camera stream
         
@@ -21,7 +21,6 @@ class OpenCVGstreamerStream:
             width: Stream width in pixels
             height: Stream height in pixels
             fps: Target frames per second
-            is_csi: True if using CSI camera, False for USB camera
             sensor_id: Sensor ID for CSI camera (typically 0 or 1 on Jetson)
             flip_method: Video flip method (0=none, 1=counterclockwise, 2=180, 3=clockwise)
         """
@@ -29,7 +28,6 @@ class OpenCVGstreamerStream:
         self.width = width
         self.height = height
         self.fps = fps
-        self.is_csi = is_csi
         self.sensor_id = sensor_id
         self.flip_method = flip_method
         
@@ -51,20 +49,17 @@ class OpenCVGstreamerStream:
         return cv2.getBuildInformation().find("GStreamer") != -1
     
     def build_pipeline_string(self):
-        if self.is_csi:
             # Simplified CSI camera pipeline
-            return (
-                f"nvarguscamerasrc sensor-id={self.sensor_id} ! "
-                f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
-                f"format=NV12, framerate={self.fps}/1 ! "
-                f"nvvidconv ! "
-                f"video/x-raw, format=BGRx ! "
-                f"videoconvert ! "
-                f"video/x-raw, format=BGR ! "
-                f"appsink drop=1"
-            )
-        else:
-            print("Using USB camera")
+        return (
+            f"nvarguscamerasrc sensor-id={self.sensor_id} ! "
+            f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
+            f"format=NV12, framerate={self.fps}/1 ! "
+            f"nvvidconv ! "
+            f"video/x-raw, format=BGRx ! "
+            f"videoconvert ! "
+            f"video/x-raw, format=BGR ! "
+            f"appsink drop=1"
+        )
     
     def start_capture(self):
         """Start capturing frames using OpenCV with GStreamer pipeline"""
