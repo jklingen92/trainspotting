@@ -5,6 +5,7 @@ import socket
 from detection.camera_stream import CameraStream
 import numpy as np  # Required for blank frame
 from django.conf import settings
+from django.urls import path
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.http import StreamingHttpResponse
@@ -113,11 +114,6 @@ class Command(BaseCommand):
             </body>
             </html>
             """)
-        
-        # Configure URLs
-        from django.urls import include, path
-        from django.contrib import admin
-        from django.conf.urls import url
         
         # Store the original URLconf
         original_urlconf = settings.ROOT_URLCONF
