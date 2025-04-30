@@ -1,6 +1,7 @@
 import threading
 import cv2
 import time
+from detection.pipeline import build_pipeline
 import numpy as np
 import gi
 gi.require_version('Gst', '1.0')
@@ -77,7 +78,14 @@ class OpenCVGstreamerStream:
     def start_capture(self):
         """Start capturing frames using OpenCV with GStreamer pipeline"""
         try:
-            pipeline_str = self.build_pipeline_string()
+            pipeline_str = build_pipeline(
+                camera_id=self.camera_id,
+                resolution=(self.width, self.height),
+                framerate=self.fps,
+                exposure=450000,  # 1ms exposure time
+                bitrate=1000000,  # 1Mbps bitrate
+                auto_gain=False,  # Disable auto gain
+            )
             print(f"Using pipeline: {pipeline_str}")
             
             # Open camera using GStreamer pipeline
