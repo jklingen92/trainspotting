@@ -52,40 +52,22 @@ class OpenCVGstreamerStream:
     
     def build_pipeline_string(self):
         """Build the GStreamer pipeline string for OpenCV based on camera type"""
-        if self.is_csi:
-            # CSI camera pipeline using nvarguscamerasrc
-            return (
-                f"nvarguscamerasrc sensor-id={self.sensor_id} ! "
-                f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
-                f"format=NV12, framerate={self.fps}/1 ! "
-                f"nvvidconv flip-method={self.flip_method} ! "
-                f"video/x-raw, format=BGRx ! "
-                f"videoconvert ! "
-                f"video/x-raw, format=BGR ! "
-                f"appsink drop=1"
-            )
-        else:
-            # USB camera pipeline using v4l2src
-            return (
-                f"v4l2src device=/dev/video{self.camera_id} ! "
-                f"video/x-raw, width={self.width}, height={self.height}, "
-                f"format=YUY2, framerate={self.fps}/1 ! "
-                f"videoconvert ! "
-                f"video/x-raw, format=BGR ! "
-                f"appsink drop=1"
-            )
+        # CSI camera pipeline using nvarguscamerasrc
+        return (
+            f"nvarguscamerasrc sensor-id={self.sensor_id} ! "
+            f"video/x-raw(memory:NVMM), width={self.width}, height={self.height}, "
+            f"format=NV12, framerate={self.fps}/1 ! "
+            f"nvvidconv flip-method={self.flip_method} ! "
+            f"video/x-raw, format=BGRx ! "
+            f"videoconvert ! "
+            f"video/x-raw, format=BGR ! "
+            f"appsink drop=1"
+        )
     
     def start_capture(self):
         """Start capturing frames using OpenCV with GStreamer pipeline"""
         try:
-            pipeline_str = build_pipeline(
-                camera_id=self.camera_id,
-                resolution=(self.width, self.height),
-                framerate=self.fps,
-                exposure=450000,  # 1ms exposure time
-                bitrate=1000000,  # 1Mbps bitrate
-                auto_gain=False,  # Disable auto gain
-            )
+            pipeline_str = self.build_pipeline_string()
             print(f"Using pipeline: {pipeline_str}")
             
             # Open camera using GStreamer pipeline
