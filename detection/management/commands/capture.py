@@ -17,7 +17,6 @@ class Command(BaseCommand):
         parser.add_argument('--output_dir', type=str, default=None, help='Path to store captured motion')
         parser.add_argument('--duration', type=int, default=0, help='Duration of the capture in seconds (0 for continuous capture)')
         parser.add_argument('--exposure', type=int, default=450000, help='Exposure time in microseconds')
-        parser.add_argument('--auto_gain', type=bool, default=True, help='Enable or disable auto gain')
         parser.add_argument('--resolution', type=str, default='3840x2160', help='Resolution in WIDTHxHEIGHT format')
         parser.add_argument('--framerate', type=int, default=30, help='Frames per second')
         parser.add_argument('--bitrate', type=int, default=50000, help='Bitrate in kbps')
@@ -31,7 +30,6 @@ class Command(BaseCommand):
         output_dir = options['output_dir']
         duration = options['duration']
         exposure = options['exposure']
-        auto_gain = options['auto_gain']
         resolution = options['resolution']
         framerate = options['framerate']
         bitrate = options['bitrate']
@@ -61,7 +59,6 @@ class Command(BaseCommand):
         self.stdout.write(f'Output File: {output_dir}')
         self.stdout.write(f'Duration: {duration} seconds')
         self.stdout.write(f'Exposure: {exposure} microseconds')
-        self.stdout.write(f'Auto Gain: {auto_gain}')
         self.stdout.write(f'Resolution: {width}x{height}')
         self.stdout.write(f'Framerate: {framerate} fps')
         self.stdout.write(f'Bitrate: {bitrate} kbps')
@@ -77,8 +74,7 @@ class Command(BaseCommand):
             framerate=framerate,
             exposure=exposure,
             bitrate=bitrate,
-            auto_gain=auto_gain,
-            preview=True
+            preview=False
         )
 
         self.stdout.write(f"Camera pipeline: {pipeline_str}")
