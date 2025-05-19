@@ -2,7 +2,8 @@ import os
 import cv2
 from django.core.management.base import BaseCommand, CommandError
 
-from detection.capture_pipeline import CapturePipeline
+from detection.pipeline import GStreamerPipeline
+
 
 class Command(BaseCommand):
     help = 'Takes a snapshot from camera using OpenCV with GStreamer'
@@ -38,11 +39,12 @@ class Command(BaseCommand):
         warmup_frames = options['warmup_frames']
 
         try:
-            pipeline = CapturePipeline(sensor_mode=sensor_mode, exposure=exposure, warmup_frames=warmup_frames)
-            
+            pipeline = GStreamerPipeline(sensor_mode=sensor_mode, exposure=exposure, warmup_frames=warmup_frames)
+            cap = pipeline.open_capture(exposure=exposure)
+
             # Take the actual snapshot
             self.stdout.write("Taking snapshot...")
-            ret, frame = pipeline.cap.read()
+            ret, frame = cap.read()
             
             if not ret or frame is None:
                 raise CommandError("Failed to grab frame for snapshot")

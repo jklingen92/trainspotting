@@ -5,7 +5,8 @@ import time
 import logging
 from django.http import HttpResponse
 
-from detection.capture_pipeline import CapturePipeline
+from detection.pipeline import GStreamerPipeline
+
 
 # Set up logging
 logging.basicConfig(
@@ -18,9 +19,10 @@ class SnapshotView(View):
     """View that captures and displays a snapshot from the camera"""
     
     def get(self, request):
-        pipeline = CapturePipeline(sensor_mode=0, exposure=450000, warmup_frames=15)    
+        pipeline = GStreamerPipeline(sensor_mode=0)
+        cap = pipeline.open_capture(exposure=450000, warmup_frames=15)
         # Capture the image
-        ret, frame = pipeline.cap.read()
+        ret, frame = cap.read()
         
         # Convert to JPEG and then base64 for embedding in HTML
         _, buffer = cv2.imencode('.png', frame)
@@ -106,12 +108,13 @@ class CameraStream:
             return
             
         # Create the GStreamer pipeline
-        self.pipeline = CapturePipeline(
+        self.pipeline = GStreamerPipeline(
             sensor_mode=self.sensor_mode,
-            exposure=self.exposure,
-            warmup_frames=15
         )
-        self.video = self.pipeline.cap
+
+        self.video = self.pipeline.open_capture(
+            exposure=self.exposure,
+        )
     
    
         # Read a test frame

@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from django.core.management.base import BaseCommand
 
-from detection.capture_pipeline import CapturePipeline
+from detection.pipeline import GStreamerPipeline
 
 
 class Command(BaseCommand):
@@ -72,38 +72,20 @@ class Command(BaseCommand):
             return
         
         # Build GStreamer pipelines for capture and output
-        capture_pipeline = CapturePipeline(
-            sensor_mode=sensor_mode,
+        pipeline = GStreamerPipeline(
+            sensor_mode=sensor_mode
+        )
+
+        cap = pipeline.open_capture(
             exposure=exposure,
         )
         
-        output_pipeline = self._build_output_pipeline(
-            width, height, framerate, bitrate, output_path
+        out = pipeline.open_output(
+            framerate=framerate, 
+            bitrate=bitrate, 
+            output_path=output_path
         )
-        
-        self.stdout.write(f"Capture pipeline: {capture_pipeline}")
-        self.stdout.write(f"Output pipeline: {output_pipeline}")
-        
-        # Open camera with GStreamer capture pipeline
-        cap = capture_pipeline.cap
-        if not cap.isOpened():
-            self.stderr.write(self.style.ERROR("Failed to open camera with GStreamer pipeline"))
-            return
-            
-        # Create video writer with GStreamer output pipeline
-        out = cv2.VideoWriter(
-            output_pipeline, 
-            cv2.CAP_GSTREAMER, 
-            0,  # fourcc not used with GStreamer
-            float(framerate), 
-            (width, height)
-        )
-        
-        if not out.isOpened():
-            self.stderr.write(self.style.ERROR("Failed to open output pipeline"))
-            cap.release()
-            return
-            
+ 
         self.stdout.write(f"Started recording to {output_path}")
         self.stdout.write(f"Resolution: {width}x{height}, Duration: {duration}s")
         
@@ -152,18 +134,6 @@ class Command(BaseCommand):
                 f"Recording completed. Duration: {elapsed:.2f}s, "
                 f"Frames: {frames_captured}, Avg FPS: {fps:.2f}"
             ))
-    
-    def _build_output_pipeline(self, width, height, framerate, bitrate, output_path):
-        """
-        Build the GStreamer pipeline for output with OpenCV
-        """
-        pipeline = (
-            f"appsrc ! videoconvert ! video/x-raw,format=I420 ! "
-            f"x264enc tune=zerolatency bitrate={bitrate} speed-preset=ultrafast ! "
-            f"h264parse ! mp4mux ! filesink location={output_path}"
-        )
-        
-        return pipeline
     
     def _process_frame(self, frame):
         """
