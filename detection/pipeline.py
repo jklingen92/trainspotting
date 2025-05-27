@@ -5,8 +5,9 @@ import cv2
 
 
 class GStreamerPipeline:
-    def __init__(self, sensor_mode=0):
+    def __init__(self, sensor_mode=0, capture_class=cv2.VideoCapture):
         self.sensor_mode = sensor_mode
+        self.capture_class = capture_class
         if sensor_mode in [0, 1]:
             self.width, self.height = 3840, 2160  # 4K
         elif sensor_mode == 2:
@@ -14,11 +15,11 @@ class GStreamerPipeline:
         else:
             raise Exception(f"Invalid sensor mode: {sensor_mode}")
       
-    def open_capture(self, exposure=450000, warmup_frames=10):
+    def open_capture(self, exposure=450000, warmup_frames=10, **kwargs):
         self.exposure = exposure
         self.warmup_frames = warmup_frames
 
-        self.cap = cv2.VideoCapture(self.get_capture_pipeline_str(exposure), cv2.CAP_GSTREAMER)
+        self.cap = self.capture_class(self.get_capture_pipeline_str(exposure), cv2.CAP_GSTREAMER, **kwargs)
         if not self.cap.isOpened():
             self.release()
             raise Exception("Failed to open camera with GStreamer pipeline")

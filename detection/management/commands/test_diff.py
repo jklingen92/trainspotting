@@ -1,171 +1,89 @@
-from datetime import datetime
-import sys
-import time
-import traceback
-import uuid
-from django.core.management.base import BaseCommand
-import os
-import cv2
-from django.conf import settings
+# motion_detector/management/commands/capture_motion.py
 
-from detection.difference import detect_large_motion
-from detection.pipeline import GStreamerPipeline
+import cv2
+import os
+from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
+from detection.motion_capture import MotionCapture
 
 class Command(BaseCommand):
-    help = 'Test video capture with specified parameters'
+    help = 'Captures and analyzes motion from a video file or camera'
 
     def add_arguments(self, parser):
-        parser.add_argument('--output_dir', type=str, default=None, help='Path to store videos motion')
-        parser.add_argument('--max_file_size', type=int, default=0, help='Maximum file size in GB (0 for unlimited)')
-        parser.add_argument('--duration', type=int, default=3600, help='Duration of the capture in seconds (0 for continuous capture)')
+        # Required arguments
+        parser.add_argument('source', type=str, 
+                            help='Video file path or camera index (0 for default camera)')
         
-        parser.add_argument('--sensor_mode', default=0, help='Sensor mode (0 or 1 for 4K, 2 for 1080p)')
-        parser.add_argument('--exposure', type=int, default=450000, help='Exposure time in microseconds')
-        parser.add_argument('--framerate', type=int, default=30, help='Frames per second')
-        parser.add_argument('--bitrate', type=int, default=50000, help='Bitrate in kbps')
-        
-        parser.add_argument('--min_clip_length', type=int, default=3, help='Minimum length in seconds for a saved clip')
-        
+        # Optional arguments
+        parser.add_argument('--threshold', type=int, default=25,
+                            help='Threshold for motion detection (default: 25)')
+        parser.add_argument('--min-area', type=float, default=0.05,
+                            help='Minimum percentage of frame that must change (default: 0.05 or 5%%)')
+        parser.add_argument('--skip-frames', type=int, default=5,
+                            help='Process every Nth frame for motion detection (default: 5)')
+        parser.add_argument('--min-motion-seconds', type=float, default=1.0,
+                            help='Minimum motion duration in seconds (default: 1.0)')
+        parser.add_argument('--min-stillness-seconds', type=float, default=1.0,
+                            help='Minimum stillness duration in seconds (default: 1.0)')
+        parser.add_argument('--resize-width', type=int, default=480,
+                            help='Width to resize frames for processing (default: 480)')
+        parser.add_argument('--cuda', action='store_true',
+                            help='Enable CUDA acceleration')
+        parser.add_argument('--start-frame', type=int, default=0,
+                            help='Start processing from this frame number (default: 0)')
 
     def handle(self, *args, **options):
-        output_dir = options['output_dir']
-        max_file_size = options['max_file_size']
-        duration = options['duration']
-
-        sensor_mode = options['sensor_mode']
-        exposure = options['exposure']
-        framerate = options['framerate']
-        bitrate = options['bitrate']
+        # Parse source - camera index or file path
+        source = options['source']
+        if source.isdigit():
+            source = int(source)
+        elif not os.path.exists(source):
+            raise CommandError(f"Video file not found: {source}")
         
-        min_clip_length = options['min_clip_length']
-
-        # Generate output file name if not provided
-        if output_dir is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_dir = f"camera_capture_{timestamp}"
-
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Log the parameters
-        self.stdout.write(self.style.SUCCESS('Starting capture with the following parameters:'))
-        self.stdout.write(f'Output File: {output_dir}')
-        self.stdout.write(f'Max File Size: {max_file_size} GB')
-        self.stdout.write(f'Duration: {duration} seconds')
-
-        self.stdout.write(f'Sensor Mode: {sensor_mode}')
-        self.stdout.write(f'Exposure: {exposure} nanoseconds')
-        self.stdout.write(f'Framerate: {framerate} fps')
-        self.stdout.write(f'Bitrate: {bitrate} kbps')
-
-        self.stdout.write(f'Minimum Clip Length: {min_clip_length} seconds')
-
-        # Create GStreamer pipeline for camera capture
-        pipeline = GStreamerPipeline(
-            sensor_mode=sensor_mode,
-        )
-
-        cap = pipeline.open_capture(
-            exposure=exposure,
-        )
-
-
-        frame_count = 0  # Reset frame count for current file
-        bytes_per_frame_estimate = (pipeline.width * pipeline.height * 3) / (8 * 1024 * 1024 * 1024)  # Rough estimate in GB
-        expected_frames_per_gb = 1.0 / bytes_per_frame_estimate if bytes_per_frame_estimate > 0 else 0
-        self.stdout.write(f"Recording settings: exposure={exposure}ns, {pipeline.width}x{pipeline.height} @ {framerate}fps")
-        self.stdout.write(f"Estimated size per frame: {bytes_per_frame_estimate:.4f} GB")
-
-        clip_number = 0
-        start_time = time.time()
-        with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
-            log_file.write(f"Started recording at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        last_progress_update = 0
-        frame_count = 0
-        total_frame_count = 0
-
-        motion_frames = 0
-        still_frames = 0
-        previous_frame = None
-        
-
-        out = pipeline.open_output(os.path.join(output_dir, f"capture_0.mp4"))
-
-        self.stdout.write(f"Recording for {duration} seconds. Motion events will be logged to {output_dir}/motion.log")
-
         try:
-            while time.time() - start_time < duration:
-                ret, frame = cap.read()
-                if not ret:
-                    self.stdout.write(f"Failed to grab frame")
+            # Initialize MotionCapture
+            motion_cap = MotionCapture(
+                source=source,
+                skip_frames=options['skip_frames'],
+                threshold=options['threshold'],
+                min_area_percentage=options['min_area'],
+                min_motion_seconds=options['min_motion_seconds'],
+                min_stillness_seconds=options['min_stillness_seconds'],
+                resize_width=options['resize_width'],
+                use_cuda=options['cuda'],
+            )
+            
+            if not motion_cap.isOpened():
+                raise CommandError(f"Could not open video source: {source}")
+            
+            motion_cap.set(cv2.CAP_PROP_POS_FRAMES, options['start_frame'])
+            motion_cap.frame_count = options['start_frame']
+            self.stdout.write(f"Starting motion capture from: {source}")
+            
+            start_time = timezone.now()
+            self.stdout.write(f"Start time: {start_time}")
+
+            # Main processing loop
+            while True:
+                success, _ = motion_cap.read()
+                if not success:
                     break
                 
-                frame_count += 1
-                total_frame_count += 1
+                print(f"Processing frame {motion_cap.frame_count} - Motion: {int(motion_cap.motion_percentage * 100):2d}% {motion_cap.motion_detected} - {motion_cap.consecutive_motion_frames} / {motion_cap.consecutive_still_frames}")
 
-                current_time = time.time()
-                elapsed = current_time - start_time
-                
-                # Only update progress every 0.5 seconds to reduce terminal output
-                if current_time - last_progress_update >= 0.5:
-                    fps = total_frame_count / elapsed if elapsed > 0 else 0
-                    progress = min(100, int(elapsed / duration * 100))
-                    sys.stdout.write(f"\rRecording: {progress}% complete | Time: {int(elapsed)}s/{duration}s | FPS: {fps:.1f} | Frames: {total_frame_count}  ")
-                    sys.stdout.flush()
-                    last_progress_update = current_time
-
-
-                # Only start motion detection when we have enough frames
-                if previous_frame is None:
-                    previous_frame = frame.copy()
-                    continue
-                    
-
-                # Check for motion
-                motion_detected, _, _ = detect_large_motion(
-                    previous_frame, frame, threshold=15
-                )
-
-                if motion_detected:
-                    still_frames = 0
-                    if motion_frames == 0:
-                        motion_frames += 1
-                        with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
-                            log_file.write(f"Motion begun at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} after {still_frames} still frames\n")
-                    else:
-                        motion_frames += 1
-                else:
-                    if motion_frames == 0:
-                        still_frames += 1
-                    else:
-                        still_frames = 1
-                        with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
-                            log_file.write(f"Motion ended at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} after {motion_frames} frames\n")
-                        motion_frames = 0
-
-                # Write current frame unless we're stopping
-                if out:
-                    out.write(frame)    
-                        
-                previous_frame = frame.copy()
-
-                if frame_count >= expected_frames_per_gb * max_file_size:
-                    self.stdout.write(f"Max file size reached, creating new file")
-                    out.release()
-                    clip_number += 1
-                    out = pipeline.open_output(os.path.join(output_dir, f"capture_{clip_number}.mp4"))
-                    frame_count = 0
-                
-                # if cv2.waitKey(1) & 0xFF == ord('q'):
-                #     break
-
-
-            with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
-                log_file.write(f"Ended recording at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            # Clean up
-            pipeline.release()
+               
+            end_time = timezone.now()
+            frames_processed = motion_cap.frame_count - options['start_frame']
+            time_elapsed = (end_time - start_time).total_seconds()
+            self.stdout.write(self.style.SUCCESS("Motion capture complete"))
+            self.stdout.write(f"End time: {end_time}")
+            self.stdout.write(f"Processed {frames_processed} frames in {time_elapsed:.2f} seconds | Effective FPS: {frames_processed / time_elapsed:.2f}")
 
         except Exception as e:
-            self.stdout.write(f"ERROR: {str(e)}")
-            self.stdout.write("Traceback:")
-            traceback.print_exc()
-            return False
+            raise CommandError(f"Error during motion capture: {str(e)}")
+        
+        finally:
+            # Clean up
+            if 'motion_cap' in locals():
+                motion_cap.release()
+            
