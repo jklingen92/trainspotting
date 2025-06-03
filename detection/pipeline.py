@@ -8,6 +8,7 @@ class GStreamerPipeline:
     def __init__(self, sensor_mode=0, capture_class=cv2.VideoCapture):
         self.sensor_mode = sensor_mode
         self.capture_class = capture_class
+        self.resources = []
         if sensor_mode in [0, 1]:
             self.width, self.height = 3840, 2160  # 4K
         elif sensor_mode == 2:
@@ -19,31 +20,30 @@ class GStreamerPipeline:
         self.exposure = exposure
         self.warmup_frames = warmup_frames
 
-        self.cap = self.capture_class(self.get_capture_pipeline_str(exposure), cv2.CAP_GSTREAMER, **kwargs)
-        if not self.cap.isOpened():
+        cap = self.capture_class(self.get_capture_pipeline_str(exposure), cv2.CAP_GSTREAMER, **kwargs)
+        self.resources.append(cap)
+        if not cap.isOpened():
             self.release()
             raise Exception("Failed to open camera with GStreamer pipeline")
         
         for i in range(warmup_frames):
-            ret, _ = self.cap.read()
+            ret, _ = cap.read()
             if not ret:
                 raise Exception(f"Failed to grab frame during warmup ({i}/{warmup_frames})")
                 
             # Sleep a bit between frames to give more time for adjustment
             time.sleep(0.1)
 
-        return self.cap
+        return cap
     
     def open_output(self, output_path, bitrate=50000, framerate=30):
-        self.bitrate = bitrate
-        self.framerate = framerate
-        self.output_path = output_path
 
-        self.out = cv2.VideoWriter(self.get_output_pipeline_str(output_path, bitrate, framerate), cv2.CAP_GSTREAMER, 0, float(framerate), (self.width, self.height))
-        if not self.out.isOpened():
+        out = cv2.VideoWriter(self.get_output_pipeline_str(output_path, bitrate, framerate), cv2.CAP_GSTREAMER, 0, float(framerate), (self.width, self.height))
+        self.resources.append(out)
+        if not out.isOpened():
             self.release()
             raise Exception(f"Failed to open video writer with GStreamer pipeline for {output_path}")
-        return self.out
+        return out
 
     def get_capture_pipeline_str(self, exposure):
         return (
@@ -61,7 +61,7 @@ class GStreamerPipeline:
         )
     
     def release(self):
-        if self.cap and self.cap.isOpened():
-            self.cap.release()
-        if self.out and self.out.isOpened():
-            self.out.release()
+        for resource in self.resources:
+            if resource.isOpened():
+                resource.release()
+        self.resources.clear()

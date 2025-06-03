@@ -40,7 +40,7 @@ class Command(BaseCommand):
 
         # Generate output file name if not provided
         if output_dir is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = timezone.localtime().strftime("%Y%m%d_%H%M%S")
             output_dir = f"camera_capture_{timestamp}"
 
         os.makedirs(output_dir, exist_ok=True)
@@ -76,7 +76,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Estimated size per frame: {bytes_per_frame_estimate:.4f} GB")
 
         clip_number = 0
-        start_time = timezone.now()
+        start_time = timezone.localtime()
         with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
             log_file.write(f"Sensor Mode: {sensor_mode}\n")
             log_file.write(f"Exposure: {exposure} nanoseconds\n")
@@ -86,24 +86,24 @@ class Command(BaseCommand):
             log_file.write(f"Max File Size: {max_file_size} GB\n")
             log_file.write(f"Duration: {duration} seconds\n")
             log_file.write(f"Output Directory: {output_dir}\n")
-            log_file.write(f"Started recording at {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            log_file.write(f"Started recording at {timezone.localtime().strftime('%Y-%m-%d %H:%M:%S')}\n")
         
         last_progress_update = 0
 
         out = pipeline.open_output(os.path.join(output_dir, f"capture_000.mp4"))
 
         self.stdout.write(f"Recording for {duration} seconds. Motion events will be logged to {output_dir}/motion.log")
+        recording = False
 
         try:
-            while (timezone.now() - start_time).total_seconds() < duration:
+            while (timezone.localtime() - start_time).total_seconds() < duration:
                 ret, frame = cap.read()
                 if not ret:
                     self.stdout.write(f"Failed to grab frame")
                     break
                 
                 chunk_frame_count += 1
-                recording = False
-                current_time = timezone.now()
+                current_time = timezone.localtime()
                 timestamp = current_time.strftime('%Y-%m-%d %H:%M:%S')
 
                 elapsed = (current_time - start_time).total_seconds()
@@ -118,11 +118,11 @@ class Command(BaseCommand):
 
                     if cap.motion_detected and not recording:
                         with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
-                            log_file.write(f"Motion begun at {cap.motion_start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                            log_file.write(f"{timestamp}: Motion begun at {cap.motion_start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                         recording = True
                     elif not cap.motion_detected and recording:
                         with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
-                            log_file.write(f"Motion ended at {timestamp}\n")
+                            log_file.write(f"{timestamp}: Motion ended at {timestamp}\n")
                         recording = False
 
                 # Write current frame unless we're stopping
@@ -135,7 +135,7 @@ class Command(BaseCommand):
                     self.stdout.write(f"Max file size reached, creating new file")
                     out.release()
                     clip_number += 1
-                    out = pipeline.open_output(os.path.join(output_dir, f"capture_{clip_number:02}.mp4"))
+                    out = pipeline.open_output(os.path.join(output_dir, f"capture_{clip_number:03}.mp4"))
                     chunk_frame_count = 0
                 
                 # if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -143,7 +143,7 @@ class Command(BaseCommand):
 
 
             with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
-                log_file.write(f"Ended recording at {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                log_file.write(f"Ended recording at {timezone.localtime().strftime('%Y-%m-%d %H:%M:%S')}")
             
             
             self.stdout.write(f"Processed {cap.frame_count} frames in {int(elapsed)} seconds")

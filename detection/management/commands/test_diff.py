@@ -15,20 +15,14 @@ class Command(BaseCommand):
                             help='Video file path or camera index (0 for default camera)')
         
         # Optional arguments
-        parser.add_argument('--threshold', type=int, default=25,
-                            help='Threshold for motion detection (default: 25)')
-        parser.add_argument('--min-area', type=float, default=0.05,
-                            help='Minimum percentage of frame that must change (default: 0.05 or 5%%)')
-        parser.add_argument('--skip-frames', type=int, default=5,
-                            help='Process every Nth frame for motion detection (default: 5)')
-        parser.add_argument('--min-motion-seconds', type=float, default=1.0,
-                            help='Minimum motion duration in seconds (default: 1.0)')
-        parser.add_argument('--min-stillness-seconds', type=float, default=1.0,
-                            help='Minimum stillness duration in seconds (default: 1.0)')
-        parser.add_argument('--resize-width', type=int, default=480,
-                            help='Width to resize frames for processing (default: 480)')
-        parser.add_argument('--cuda', action='store_true',
-                            help='Enable CUDA acceleration')
+        parser.add_argument('--threshold', type=int, help='Threshold for motion detection (default: 25)')
+        parser.add_argument('--min-area-start', type=float, help='Minimum percentage of frame that must change to start motion (default: 0.05 or 5%%)')
+        parser.add_argument('--min-area-end', type=float, help='Minimum percentage of frame that must change to end motion(default: 0.25 or 25%%)')
+        parser.add_argument('--skip-frames', type=int, help='Process every Nth frame for motion detection (default: 5)')
+        parser.add_argument('--min-motion-seconds', type=float, help='Minimum motion duration in seconds (default: 1.0)')
+        parser.add_argument('--min-stillness-seconds', type=float, help='Minimum stillness duration in seconds (default: 1.0)')
+        parser.add_argument('--resize-width', type=int, help='Width to resize frames for processing (default: 480)')
+        parser.add_argument('--cuda', action='store_true', help='Enable CUDA acceleration')
         parser.add_argument('--start-frame', type=int, default=0,
                             help='Start processing from this frame number (default: 0)')
 
@@ -40,17 +34,20 @@ class Command(BaseCommand):
         elif not os.path.exists(source):
             raise CommandError(f"Video file not found: {source}")
         
+        kwargs = {}
+        for key in ['threshold', 'min_area_start', 'min_area_end', 'skip_frames', 
+                  'min_motion_seconds', 'min_stillness_seconds', 'resize_width']:
+            if options[key] is not None:
+                kwargs[key] = options[key]
+        if options['cuda']:
+            kwargs['use_cuda'] = options['cuda']
+
+
         try:
             # Initialize MotionCapture
             motion_cap = MotionCapture(
-                source=source,
-                skip_frames=options['skip_frames'],
-                threshold=options['threshold'],
-                min_area_percentage=options['min_area'],
-                min_motion_seconds=options['min_motion_seconds'],
-                min_stillness_seconds=options['min_stillness_seconds'],
-                resize_width=options['resize_width'],
-                use_cuda=options['cuda'],
+                source,
+                **kwargs,
             )
             
             if not motion_cap.isOpened():
@@ -60,19 +57,28 @@ class Command(BaseCommand):
             motion_cap.frame_count = options['start_frame']
             self.stdout.write(f"Starting motion capture from: {source}")
             
-            start_time = timezone.now()
+            start_time = timezone.localtime()
             self.stdout.write(f"Start time: {start_time}")
 
+            recording = False
             # Main processing loop
             while True:
-                success, _ = motion_cap.read()
+                success, frame = motion_cap.read()
                 if not success:
                     break
                 
-                print(f"Processing frame {motion_cap.frame_count} - Motion: {int(motion_cap.motion_percentage * 100):2d}% {motion_cap.motion_detected} - {motion_cap.consecutive_motion_frames} / {motion_cap.consecutive_still_frames}")
-
+                self.stdout.write(f"Processing frame {motion_cap.frame_count} - Motion: {int(motion_cap.motion_percentage * 100):2d}% {motion_cap.motion_detected} - {motion_cap.consecutive_motion_frames} / {motion_cap.consecutive_still_frames}", ending='\r')
+                
+                if motion_cap.motion_detected and not recording:
+                    recording = True
+                    self.stdout.write(f"Motion detected at frame {motion_cap.frame_count}")
+                    cv2.imwrite(f"motion_frame_{motion_cap.frame_count}.png", frame)
+                if not motion_cap.motion_detected and recording:
+                    recording = False
+                    self.stdout.write(f"Motion ended at frame {motion_cap.frame_count}")
+                    cv2.imwrite(f"still_frame_{motion_cap.frame_count}.png", frame)
                
-            end_time = timezone.now()
+            end_time = timezone.localtime()
             frames_processed = motion_cap.frame_count - options['start_frame']
             time_elapsed = (end_time - start_time).total_seconds()
             self.stdout.write(self.style.SUCCESS("Motion capture complete"))
