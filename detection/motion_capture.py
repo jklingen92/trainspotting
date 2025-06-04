@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import time
 from threading import Lock
 
 from django.utils import timezone
@@ -17,7 +16,10 @@ class MotionCapture(cv2.VideoCapture):
         Number of frames to skip between motion detection operations
     threshold : int, optional (default=25)
         Threshold for pixel differences (0-255)
-    min_area_percentage : float, optional (default=0.05)
+    min_area_start : float, optional (default=0.05)
+        Minimum percentage of frame that must change for motion detection
+    resize_width : int, optional (default=480)
+    min_area_end : float, optional (default=0.05)
         Minimum percentage of frame that must change for motion detection
     resize_width : int, optional (default=480)
         Width to resize frames to for processing
@@ -31,21 +33,24 @@ class MotionCapture(cv2.VideoCapture):
         Whether to use CUDA acceleration if available
     """
     
-    def __init__(self, source, skip_frames=5, threshold=20, min_area_percentage=0.05,
-                 resize_width=480, fps=30, min_motion_seconds=1.0, 
-                 min_stillness_seconds=1.0, use_cuda=False):
+    def __init__(self, *args, skip_frames=5, threshold=10, min_area_start=0.2, min_area_end=0.05,
+                 resize_width=360, fps=30, min_motion_seconds=1.0, 
+                 min_stillness_seconds=1.0, use_cuda=False, 
+                 learning_frames=150, **kwargs):
         # Initialize the parent VideoCapture
-        super().__init__(source)
+        super().__init__(*args, **kwargs)
         
         # Store parameters
         self.skip_frames = skip_frames
         self.threshold = threshold
-        self.min_area_percentage = min_area_percentage
+        self.min_area_start = min_area_start
+        self.min_area_end = min_area_end
         self.resize_width = resize_width
         self.fps = fps
         self.min_motion_frames = int(min_motion_seconds * fps)
         self.min_stillness_frames = int(min_stillness_seconds * fps)
         self.use_cuda = False
+        self.learning_frames = learning_frames
         
         if use_cuda:
             if not cv2.cuda.getCudaEnabledDeviceCount() > 0:
@@ -150,7 +155,10 @@ class MotionCapture(cv2.VideoCapture):
     def _update_motion_state(self, motion_percentage):
         """Update motion detection state based on current frame analysis"""
         # Check if motion percentage exceeds the minimum area threshold
-        is_motion = motion_percentage >= self.min_area_percentage
+        if not self.motion_detected:
+            is_motion = motion_percentage >= self.min_area_start
+        else:
+            is_motion = motion_percentage >= self.min_area_end
         
         # Update consecutive frame counters
         if is_motion:
@@ -160,7 +168,7 @@ class MotionCapture(cv2.VideoCapture):
             # Record motion start time when we first detect motion
             if not self.motion_detected and self.consecutive_motion_frames >= self.min_motion_frames:
                 self.motion_detected = True
-                self.motion_start_time = self.last_motion_time = timezone.now()
+                self.motion_start_time = self.last_motion_time = timezone.localtime()
         else:
             self.consecutive_still_frames += self.skip_frames
             self.consecutive_motion_frames = 0
@@ -174,7 +182,7 @@ class MotionCapture(cv2.VideoCapture):
         
         # Update last motion time if motion is detected
         if is_motion:
-            self.last_motion_time = timezone.now()
+            self.last_motion_time = timezone.localtime()
     
     def read(self):
         """
@@ -194,8 +202,10 @@ class MotionCapture(cv2.VideoCapture):
             if ret:
                 self.frame_count += 1
                 
+                if self.learning_frames > 0:
+                    self.learning_frames -= 1
                 # Perform motion detection only on specified frames to reduce CPU usage
-                if self.frame_count % self.skip_frames == 0:
+                elif self.frame_count % self.skip_frames == 0:
                     motion_percentage = self._detect_motion(frame.copy())
                     self._update_motion_state(motion_percentage)
             
@@ -205,12 +215,12 @@ class MotionCapture(cv2.VideoCapture):
     def motion_duration(self):
         """Return the duration of the current motion in seconds"""
         if self.motion_detected and self.motion_start_time is not None:
-            return (timezone.now() - self.motion_start_time).total_seconds()
+            return (timezone.localtime() - self.motion_start_time).total_seconds()
         return 0.0
     
     @property
     def time_since_last_motion(self):
         """Return time in seconds since last motion was detected"""
         if self.last_motion_time is not None:
-            return (timezone.now() - self.last_motion_time).total_seconds()
+            return (timezone.localtime() - self.last_motion_time).total_seconds()
         return float('inf')  # No motion detected yet

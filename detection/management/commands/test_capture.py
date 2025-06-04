@@ -137,10 +137,6 @@ class Command(BaseCommand):
                     clip_number += 1
                     out = pipeline.open_output(os.path.join(output_dir, f"capture_{clip_number:03}.mp4"))
                     chunk_frame_count = 0
-                
-                # if cv2.waitKey(1) & 0xFF == ord('q'):
-                #     break
-
 
             with open(os.path.join(output_dir, "motion.log"), "a") as log_file:
                 log_file.write(f"Ended recording at {timezone.localtime().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -150,7 +146,8 @@ class Command(BaseCommand):
             self.stdout.write(f"Average FPS: {cap.frame_count / elapsed:.2f}")
             
             # Clean up
-            pipeline.release()
+            cap.release()
+            out.release()
 
         except Exception as e:
             self.stdout.write(f"ERROR: {str(e)}")
