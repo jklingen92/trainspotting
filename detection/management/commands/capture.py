@@ -1,9 +1,11 @@
+import subprocess
 import traceback
 import cv2
 import logging
 from django.core.management.base import BaseCommand
 import os
 from django.utils import timezone
+from django.conf import settings
 
 from detection.motion_capture import MotionCapture
 from detection.pipeline import GStreamerPipeline
@@ -16,6 +18,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--output-dir', type=str, default=None, help='Path to store videos motion')
         parser.add_argument('--duration', type=int, default=0, help='Duration of the capture in seconds (0 for continuous capture)')
+        parser.add_argument('--cuda', action='store_true', help='Enable CUDA acceleration')
         
         parser.add_argument('--sensor-mode', type=int, default=0, help='Sensor mode (0 or 1 for 4K, 2 for 1080p)')
         parser.add_argument('--exposure', type=int, default=450000, help='Exposure time in microseconds')
@@ -29,6 +32,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         output_dir = options['output_dir']
         duration = options['duration']
+        use_cuda = options['cuda']
 
         sensor_mode = options['sensor_mode']
         exposure = options['exposure']
@@ -66,6 +70,7 @@ class Command(BaseCommand):
 
         cap = pipeline.open_capture(
             exposure=exposure,
+            use_cuda=use_cuda,
         )
 
         logger.info(f"Recording settings: exposure={exposure}ns, {pipeline.width}x{pipeline.height} @ {framerate}fps")
@@ -109,8 +114,8 @@ class Command(BaseCommand):
                         logger.info(f"Motion ended but clip too short ({clip_duration:.2f}s), deleting {current_clip}")
                     else:
                         logger.info(f"Motion ended, saved clip {current_clip} ({clip_duration:.2f}s)")
+                        subprocess.Popen(['rsync', '-avz', os.path.join(output_dir, current_clip), f'{settings.REMOTE_CLIP_REPOSITORY}:{settings.REMOTE_CLIP_DIRECTORY}'], check=True, start_new_session=True)
 
-                    logger.info(f"Releasing output for clip: {current_clip}")
                     out.release()
                     
                     out = current_clip = None
