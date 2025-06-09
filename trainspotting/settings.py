@@ -13,6 +13,10 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 import os
 from pathlib import Path
 
+# Custom settings
+REMOTE_CLIP_REPOSITORY = "jklingen@hal50.pc.cs.cmu.edu"
+REMOTE_CLIP_DIRECTORY = "/workspace2/projects/traincam/beaver/"
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
