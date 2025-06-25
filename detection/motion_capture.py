@@ -4,70 +4,106 @@ from threading import Lock
 
 from django.utils import timezone
 
-def preprocess_frame(frame, resize_width=480, use_cuda=False):
+def preprocess_frame(frame, resize_width=480, canny_low=50, canny_high=150):
     """Preprocess the frame for motion detection"""
     if frame is None:
         return None
         
-    if use_cuda:
-        # GPU-based preprocessing
-        gpu_frame = cv2.cuda_GpuMat()
-        gpu_frame.upload(frame)
-        
-        resized_gpu = cv2.cuda.resize(gpu_frame, (resize_width, int(frame.shape[0] * (resize_width / frame.shape[1]))))
-        gray_gpu = cv2.cuda.cvtColor(resized_gpu, cv2.COLOR_BGR2GRAY)
-        blurred_frame = cv2.GaussianBlur(gray_gpu.download(), (5, 5), 0)
+    gpu_frame = cv2.cuda_GpuMat()
+    gpu_frame.upload(frame)
     
-    else:
-        # CPU-based preprocessing
-        resized_frame = cv2.resize(frame, (resize_width, int(frame.shape[0] * (resize_width / frame.shape[1]))))
-        
-        # Convert to grayscale
-        gray_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2GRAY)
-        blurred_frame = cv2.GaussianBlur(gray_frame, (5, 5), 0)
-    
-    return blurred_frame
+    resized_gpu = cv2.cuda.resize(gpu_frame, (resize_width, int(frame.shape[0] * (resize_width / frame.shape[1]))))
+    gpu_gray = cv2.cuda.cvtColor(resized_gpu, cv2.COLOR_BGR2GRAY)
+    blurred_frame = cv2.GaussianBlur(gpu_gray.download(), (5, 5), 0)
+
+    gpu_blur = cv2.cuda_GpuMat()
+    gpu_blur.upload(blurred_frame)
+
+    # Perform Canny edge detection on GPU
+    canny_detector = cv2.cuda.createCannyEdgeDetector(low_thresh=canny_low, high_thresh=canny_high)
+    return canny_detector.detect(gpu_blur)
+    # edges = gpu_edges.download()
+    # return edges, gpu_edges
 
 
-def get_motion_percentage(frame_1, frame_2, threshold=10, use_cuda=False):
+def debug_gpumat(gpu_mat, name):
+    """Debug helper to check GpuMat properties"""
+    print(f"{name}:")
+    print(f"  Empty: {gpu_mat.empty()}")
+    print(f"  Size: {gpu_mat.size()}")  # height, width
+    print(f"  Type: {gpu_mat.type()}")
+    print(f"  Channels: {gpu_mat.channels()}")
+    print(f"  Depth: {gpu_mat.depth()}")
+
+
+def get_motion_percentage_cuda(current_edges_gpu, previous_edges_gpu, max_flow_magnitude=50.0):
     """
-    Detect motion by comparing the current frame with the background
+    Calculate motion using optical flow on edge images. Returns value between 0 and 1.
     
+    Args:
+        current_edges_gpu: Current frame edges (GpuMat)
+        previous_edges_gpu: Previous frame edges (GpuMat)
+        max_flow_magnitude: Maximum expected flow magnitude for normalization (pixels per frame)
+        
     Returns:
-    --------
-    motion_percentage : float
-        Percentage of pixels that changed between frames
+        float: Motion intensity between 0.0 (no motion) and 1.0 (maximum motion)
     """
-
-    gpu_1 = gpu_2 = None
-
-    # Compute absolute difference between current frame and background
-    if use_cuda:
-        # GPU-based absolute difference
-        # Placeholder - actual implementation would use cv2.cuda.absdiff
-        # Upload to GPU
-        gpu_1 = cv2.cuda_GpuMat()
-        gpu_2 = cv2.cuda_GpuMat()
-        gpu_1.upload(frame_1)
-        gpu_2.upload(frame_2)
-        
-        # Process on GPU
-        gpu_delta = cv2.cuda.absdiff(gpu_1, gpu_2)
-        gpu_thresh = cv2.cuda.threshold(gpu_delta, threshold, 255, cv2.THRESH_BINARY)[1]
-        
-        # Download result (only for counting)
-        thresh = gpu_thresh.download()
-    else:
-        # CPU-based absolute difference
-        frame_delta = cv2.absdiff(frame_1, frame_2)
-        thresh = cv2.threshold(frame_delta, threshold, 255, cv2.THRESH_BINARY)[1]
+    if previous_edges_gpu.empty() or current_edges_gpu.empty():
+        return 0.0
     
-    # Calculate percentage of changed pixels
-    changed_pixels = np.count_nonzero(thresh)
-    total_pixels = thresh.shape[0] * thresh.shape[1]
-    motion_percentage = changed_pixels / total_pixels
+    assert previous_edges_gpu.size() == current_edges_gpu.size(), "Edge images must be the same size for optical flow calculation"
 
-    return motion_percentage, gpu_1, gpu_2
+
+    try:
+        # Create Farneback optical flow calculator
+        flow_calculator = cv2.cuda_FarnebackOpticalFlow.create(
+            numLevels=3,           # Number of pyramid levels
+            pyrScale=0.5,      # Pyramid scale factor
+            fastPyramids=True,
+            winSize=15,         # Window size
+            numIters=3,       # Iterations per pyramid level
+            polyN=5,           # Neighborhood size for polynomial approximation
+            polySigma=1.2,      # Standard deviation for Gaussian kernel
+            flags=0
+        )
+        
+        # Calculate optical flow
+
+        flow = cv2.cuda_GpuMat(previous_edges_gpu.size(), cv2.CV_32FC2)  # Flow output
+        flow_calculator.calc(previous_edges_gpu, current_edges_gpu, flow)
+        
+        # Split flow into x and y components
+        flow_parts = cv2.cuda.split(flow)
+        flow_x = flow_parts[0]  # Horizontal flow
+        flow_y = flow_parts[1]  # Vertical flow
+        # Calculate magnitude of flow vectors
+        magnitude = cv2.cuda_GpuMat()
+        cv2.cuda.magnitude(flow_x, flow_y, magnitude)
+        
+        # Calculate mean flow magnitude across all pixels
+        total_flow = cv2.cuda.sum(magnitude)[0]  # Sum of all flow magnitudes
+        total_pixels = magnitude.rows * magnitude.cols
+        
+        if total_pixels == 0:
+            return 0.0
+            
+        mean_flow_magnitude = total_flow / total_pixels
+        
+        # Normalize to 0-1 range using max_flow_magnitude
+        # Use a smooth saturation function instead of hard clipping
+        normalized_motion = mean_flow_magnitude / max_flow_magnitude
+        
+        # Apply sigmoid-like saturation to handle values > 1.0 gracefully
+        # This ensures very high motion doesn't just clip to 1.0
+        if normalized_motion > 1.0:
+            normalized_motion = 1.0 - (1.0 / (1.0 + normalized_motion - 1.0))
+        
+        return min(max(normalized_motion, 0.0), 1.0)  # Clamp to [0, 1]
+        
+    except Exception as e:
+        print(f"Optical flow calculation failed: {e}")
+        return 0.0
+
 
 class MotionCapture(cv2.VideoCapture):
     """
@@ -94,14 +130,11 @@ class MotionCapture(cv2.VideoCapture):
         Minimum motion duration to be considered valid
     min_stillness_seconds : float, optional (default=1.0)
         Minimum stillness duration to be considered valid
-    use_cuda : bool, optional (default=False)
-        Whether to use CUDA acceleration if available
     """
     
-    def __init__(self, *args, skip_frames=5, threshold=10, min_area_start=0.2, min_area_end=0.05,
+    def __init__(self, *args, skip_frames=5, threshold=10, min_area_start=0.05, min_area_end=0.05,
                  resize_width=360, fps=30, min_motion_seconds=1.0, 
-                 min_stillness_seconds=1.0, use_cuda=False, 
-                 learning_frames=150, **kwargs):
+                 min_stillness_seconds=1.0, learning_frames=30, **kwargs):
         # Initialize the parent VideoCapture
         super().__init__(*args, **kwargs)
         
@@ -114,18 +147,11 @@ class MotionCapture(cv2.VideoCapture):
         self.fps = fps
         self.min_motion_frames = int(min_motion_seconds * fps)
         self.min_stillness_frames = int(min_stillness_seconds * fps)
-        self.use_cuda = False
         self.learning_frames = learning_frames
-        
-        if use_cuda:
-            if not cv2.cuda.getCudaEnabledDeviceCount() > 0:
-                raise ValueError("CUDA is not available on this system.")
-            else:
-                self.use_cuda = True
         
         # Initialize motion detection variables
         self.frame_count = 0
-        self.background = None
+        self.background = cv2.cuda_GpuMat()  # Background frame for motion detection
         self.motion_detected = False
         self.consecutive_motion_frames = 0
         self.consecutive_still_frames = 0
@@ -186,31 +212,23 @@ class MotionCapture(cv2.VideoCapture):
             if ret:
                 self.frame_count += 1
                 
-                if self.learning_frames > 0:
-                    self.learning_frames -= 1
-                # Perform motion detection only on specified frames to reduce CPU usage
-                elif self.frame_count % self.skip_frames == 0:
+                if self.frame_count % self.skip_frames == 0:
                     # Preprocess the frame 
-                    current_frame = preprocess_frame(frame, resize_width=self.resize_width, use_cuda=self.use_cuda)
-
-                    motion_percentage, gpu_frame, gpu_background = get_motion_percentage(
-                        current_frame,
+                    gpu_current = preprocess_frame(frame, resize_width=self.resize_width)
+                    motion_percentage = get_motion_percentage_cuda(
                         self.background,
-                        threshold=self.threshold,
-                        use_cuda=True
+                        gpu_current
                     )
 
                     # Update background (simple approach - could use more sophisticated background subtraction)
-                    alpha = 0.05  # Learning rate
+                    # alpha = 0.05  # Learning rate
                     
-                    if self.use_cuda:
-                        # GPU-based background update
-                        cv2.cuda.addWeighted(gpu_background, 1 - alpha, gpu_frame, alpha, 0)
-                        self.background = gpu_background.download()
-                    else:
-                        # CPU-based background update
-                        self.background = cv2.addWeighted(self.background, 1 - alpha, current_frame, alpha, 0)
-    
+                    # GPU-based background update
+                    # if self.background.empty():
+                    #     self.background = gpu_current.clone()
+                    # else:
+                    #     cv2.cuda.addWeighted(self.background, 1 - alpha, gpu_current, alpha, 0)
+                    self.background = gpu_current
                     self._update_motion_state(motion_percentage)
             
             return ret, frame
@@ -536,7 +554,7 @@ def debug_check_for_train(video_file: str, output_dir: str, n_frames: int = None
     # Preprocess all frames and save preprocessed versions
     processed_frames = {}
     for frame_name in ['start', 'middle', 'end']:
-        processed = preprocess_frame(frames[frame_name], use_cuda=use_cuda)
+        processed = preprocess_frame(frames[frame_name])
         processed_frames[frame_name] = processed
         
         # Save preprocessed frame (convert back to uint8 for saving)
@@ -557,8 +575,8 @@ def debug_check_for_train(video_file: str, output_dir: str, n_frames: int = None
     difference_images = {}
     
     # Start to middle
-    start_to_middle_motion, gpu1, gpu2 = get_motion_percentage(
-        processed_frames['start'], processed_frames['middle'], threshold=threshold, use_cuda=use_cuda
+    start_to_middle_motion = get_motion_percentage_cuda(
+        processed_frames['start'], processed_frames['middle']
     )
     motion_results['start_to_middle'] = start_to_middle_motion
     
@@ -569,8 +587,8 @@ def debug_check_for_train(video_file: str, output_dir: str, n_frames: int = None
     difference_images['start_to_middle'] = diff_path
     
     # Middle to end
-    middle_to_end_motion, _, _ = get_motion_percentage(
-        processed_frames['middle'], processed_frames['end'], threshold=threshold, use_cuda=use_cuda
+    middle_to_end_motion = get_motion_percentage_cuda(
+        processed_frames['middle'], processed_frames['end']
     )
     motion_results['middle_to_end'] = middle_to_end_motion
     
@@ -581,8 +599,8 @@ def debug_check_for_train(video_file: str, output_dir: str, n_frames: int = None
     difference_images['middle_to_end'] = diff_path
     
     # Start to end (baseline)
-    start_to_end_motion, _, _ = get_motion_percentage(
-        processed_frames['start'], processed_frames['end'], threshold=threshold, use_cuda=use_cuda
+    start_to_end_motion = get_motion_percentage_cuda(
+        processed_frames['start'], processed_frames['end']
     )
     motion_results['start_to_end'] = start_to_end_motion
     
