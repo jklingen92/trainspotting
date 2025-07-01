@@ -71,12 +71,8 @@ class Command(BaseCommand):
 
         cap = pipeline.open_capture(
             exposure=exposure,
-<<<<<<< Updated upstream
-            use_cuda=use_cuda,
-=======
             track_roi=track_roi,
             debug=options['debug'],
->>>>>>> Stashed changes
         )
 
         logger.info(f"Recording settings: exposure={exposure}ns, {pipeline.width}x{pipeline.height} @ {framerate}fps")

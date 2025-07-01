@@ -44,12 +44,11 @@ class GStreamerPipeline:
         return (
             f'nvarguscamerasrc sensor-mode={self.sensor_mode} exposuretimerange="{exposure} {exposure}" !'
             f'video/x-raw(memory:NVMM), format=NV12, width={self.width}, height={self.height}, '
-            f'framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! appsink max-buffers=2 drop=true sync=false'
+            f'framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! appsink max-buffers=2 drop=true sync=false'
         )
     
     def get_output_pipeline_str(self, output_path, bitrate):
         return (
-            f'appsrc ! videoconvert ! nvv4l2h264enc profile=4 bitrate={bitrate} speed-preset=ultra-fast !'
-            f'video/x-h264, width={self.width}, height={self.height}, framerate={self.framerate}/1 ! '
-            f'queue ! h264parse ! mp4mux ! filesink location={output_path}'
+            f'appsrc ! videoconvert ! x264enc tune=zerolatency insert-vui=true pass=quant quantizer=22 speed-preset=ultrafast !'
+            f'qtmux ! filesink location={output_path}'
         )
