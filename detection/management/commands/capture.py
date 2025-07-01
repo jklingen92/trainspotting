@@ -7,7 +7,7 @@ import os
 from django.utils import timezone
 from django.conf import settings
 
-from detection.motion_capture import MotionCapture
+from detection.motion_capture import TrainCapture
 from detection.pipeline import GStreamerPipeline
 
 logger = logging.getLogger("detection")
@@ -16,7 +16,7 @@ class Command(BaseCommand):
     help = 'Test video capture with specified parameters'
 
     def add_arguments(self, parser):
-        parser.add_argument('--output-dir', type=str, default=None, help='Path to store videos motion')
+        parser.add_argument('--output-dir', type=str, default="recordings", help='Path to store videos motion')
         parser.add_argument('--duration', type=int, default=0, help='Duration of the capture in seconds (0 for continuous capture)')
         parser.add_argument('--cuda', action='store_true', help='Enable CUDA acceleration')
         
@@ -27,6 +27,9 @@ class Command(BaseCommand):
         
         parser.add_argument('--min-clip-length', type=int, default=3, help='Minimum length in seconds for a saved clip')
         parser.add_argument('--max-frame-buffer', type=int, default=90, help='Maximum number of frames to buffer before writing to disk')
+
+        parser.add_argument('--track-roi', action='store_true', help='Look for motion in the ROI (Region of Interest)')
+        parser.add_argument('--debug', action='store_true', help='Enable debug mode for additional logging')
         
 
     def handle(self, *args, **options):
@@ -42,10 +45,7 @@ class Command(BaseCommand):
         min_clip_length = options['min_clip_length']
         max_frame_buffer = options['max_frame_buffer']
 
-        # Generate output file name if not provided
-        if output_dir is None:
-            timestamp = timezone.localtime().strftime("%Y%m%d_%H%M%S")
-            output_dir = f"camera_capture_{timestamp}"
+        track_roi = options['track_roi']
 
         os.makedirs(output_dir, exist_ok=True)
 
@@ -65,24 +65,33 @@ class Command(BaseCommand):
         # Create GStreamer pipeline for camera capture
         pipeline = GStreamerPipeline(
             sensor_mode=sensor_mode,
-            capture_class=MotionCapture,
+            framerate=framerate,
+            capture_class=TrainCapture,
         )
 
         cap = pipeline.open_capture(
             exposure=exposure,
+<<<<<<< Updated upstream
             use_cuda=use_cuda,
+=======
+            track_roi=track_roi,
+            debug=options['debug'],
+>>>>>>> Stashed changes
         )
 
         logger.info(f"Recording settings: exposure={exposure}ns, {pipeline.width}x{pipeline.height} @ {framerate}fps")
 
-        start_time = current_time = timezone.localtime()
+        start_time = current_time = previous_frame_time = timezone.localtime()
         frame_buffer_full = False
         out = current_clip = None
         frame_buffer = []
+        elapsed_buffer = []
+        practical_fps = 0
 
         try:
             while True:
                 current_time = timezone.localtime()
+                elapsed = (current_time - previous_frame_time).total_seconds()
                 if duration > 0 and (current_time - start_time).total_seconds() >= duration:
                     logger.info(f"Capture duration reached {duration} seconds, stopping capture.")
                     break
@@ -90,7 +99,7 @@ class Command(BaseCommand):
                 timestamp = current_time.strftime('%Y-%m-%d %H:%M:%S')
 
                 ret, frame = cap.read()
-                self.stdout.write(f"Processing frame at {timestamp} - Motion: {int(cap.motion_percentage * 100):2d}% {cap.motion_detected} - {cap.consecutive_motion_frames} / {cap.consecutive_still_frames}", ending='\r')
+                self.stdout.write(f"{timestamp}: FRAME {cap.frame_count} | FPS {practical_fps:2.2f} | MOTION {int(cap.motion_percentage * 100):2d}%, {cap.train_detected:5}", ending='\r')
                 if not ret:
                     logger.info(f"Failed to grab frame")
                     break
@@ -99,13 +108,13 @@ class Command(BaseCommand):
                 cv2.putText(frame, timestamp, (20, 40), cv2.FONT_HERSHEY_PLAIN, 2, (0, 0, 0), 2, cv2.LINE_AA)
                 
 
-                if cap.motion_detected and out is None:
+                if cap.train_detected and out is None:
                     current_clip = f"clip_{timezone.localtime().strftime('%Y%m%d_%H%M%S')}.mp4"
-                    out = pipeline.open_output(os.path.join(output_dir, current_clip), bitrate=bitrate, framerate=framerate)
+                    out = pipeline.open_output(os.path.join(output_dir, current_clip), bitrate=bitrate)
                     motion_start_time = current_time
                     logger.info(f"Motion detected, starting new clip: {current_clip}")
                 
-                elif not cap.motion_detected and out is not None:
+                elif not cap.train_detected and out is not None:
                     clip_duration = (current_time - motion_start_time).total_seconds()
                     
                     # Check if the clip is long enough
@@ -114,7 +123,7 @@ class Command(BaseCommand):
                         logger.info(f"Motion ended but clip too short ({clip_duration:.2f}s), deleting {current_clip}")
                     else:
                         logger.info(f"Motion ended, saved clip {current_clip} ({clip_duration:.2f}s)")
-                        subprocess.Popen(['rsync', '-avz', os.path.join(output_dir, current_clip), f'{settings.REMOTE_CLIP_REPOSITORY}:{settings.REMOTE_CLIP_DIRECTORY}'], check=True, start_new_session=True)
+                        subprocess.Popen(['rsync', '-avz', os.path.join(output_dir, current_clip), f'{settings.REMOTE_CLIP_REPOSITORY}:{settings.REMOTE_CLIP_DIRECTORY}'], start_new_session=True)
 
                     out.release()
                     
@@ -124,12 +133,16 @@ class Command(BaseCommand):
 
                 if frame_buffer_full or len(frame_buffer) == max_frame_buffer: 
                     frame_buffer_full = True
+                    elapsed_buffer.pop(0)
                     if out:
                         out.write(frame_buffer.pop(0))
                     else:
                         frame_buffer.pop(0)
 
+                elapsed_buffer.append(elapsed)
+                practical_fps = len(elapsed_buffer) / sum(elapsed_buffer)
                 frame_buffer.append(frame)
+                previous_frame_time = current_time
 
             # Clean up
             if out is not None:

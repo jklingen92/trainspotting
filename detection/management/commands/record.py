@@ -73,7 +73,8 @@ class Command(BaseCommand):
         
         # Build GStreamer pipelines for capture and output
         pipeline = GStreamerPipeline(
-            sensor_mode=sensor_mode
+            sensor_mode=sensor_mode,
+            framerate=framerate, 
         )
 
         cap = pipeline.open_capture(
@@ -81,7 +82,6 @@ class Command(BaseCommand):
         )
         
         out = pipeline.open_output(
-            framerate=framerate, 
             bitrate=bitrate, 
             output_path=output_path
         )
